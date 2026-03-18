@@ -1,0 +1,32 @@
+[project]
+name = "simplisolar"
+version = "0.1.0"
+description = "Multi-view shadow engine for calculating object heights from DJI RTK drone imagery"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "numpy>=1.26.0",
+    "skyfield>=1.48",
+    "pyexiftool>=0.5.6",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.1.0",
+    "python-multipart>=0.0.9",
+    "Pillow>=10.0.0",
+    "tifffile>=2024.0.0",
+    "imagecodecs>=2024.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+asyncio_mode = "auto"
