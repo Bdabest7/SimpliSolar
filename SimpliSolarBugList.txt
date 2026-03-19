@@ -1,3 +1,2 @@
-SimpliSolar Bug fix list
+SimpliSolar Bug fix list:
 
-Start.bat cmd.exe - Frontend starts but cmd reports frontend timed out

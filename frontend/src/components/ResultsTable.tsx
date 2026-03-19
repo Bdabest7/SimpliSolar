@@ -35,7 +35,7 @@ export default function ResultsTable({ measurements }: Props) {
               Z Spread
             </th>
             <th title="Scatter of per-image tip ground positions">Tip Spread</th>
-            <th title="DSM pixel resolution">DSM Cell</th>
+            <th title="DTM pixel resolution">DTM Cell</th>
             <th title="Number of tip images used">N</th>
           </tr>
         </thead>
@@ -70,8 +70,8 @@ export default function ResultsTable({ measurements }: Props) {
                   {m.tip_spread > 0 ? `${mm(m.tip_spread)}mm` : "—"}
                 </td>
                 <td style={{ color: "var(--text-muted)", fontSize: 11 }}>
-                  {m.dsm_cell_size > 0
-                    ? `${mm(m.dsm_cell_size)}mm`
+                  {m.dtm_cell_size > 0
+                    ? `${mm(m.dtm_cell_size)}mm`
                     : "—"}
                 </td>
                 <td style={{ color: "var(--text-muted)" }}>

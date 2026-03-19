@@ -70,47 +70,47 @@ def compute_height(
     return height
 
 
-def compute_height_dsm(
+def compute_height_dtm(
     top_3d: np.ndarray,
     tip_3d: np.ndarray,
     sun_altitude_deg: float,
-    dsm,
+    dtm,
 ) -> tuple[float, float, float]:
-    """Calculate object height using shadow-length + DSM terrain correction.
+    """Calculate object height using shadow-length + DTM terrain correction.
 
     From aerial drone imagery, triangulated Z is unreliable (rays are nearly
     parallel vertically, so Z converges near camera altitude).  Instead we
-    use the well-constrained XY triangulation for shadow length, and the DSM
+    use the well-constrained XY triangulation for shadow length, and the DTM
     for ground elevations at both the object and shadow tip positions.
 
     Formula:
-        h = shadow_length_XY × tan(sun_alt) + (DSM(tip) − DSM(top))
+        h = shadow_length_XY × tan(sun_alt) + (DTM(tip) − DTM(top))
 
-    The DSM term corrects for terrain slope between the object and shadow tip.
+    The DTM term corrects for terrain slope between the object and shadow tip.
 
     Returns
     -------
     height : float
-    ground_z_top : float  (DSM elevation at object top XY)
-    ground_z_tip : float  (DSM elevation at shadow tip XY)
+    ground_z_top : float  (DTM elevation at object top XY)
+    ground_z_tip : float  (DTM elevation at shadow tip XY)
     """
     if sun_altitude_deg <= 0:
         raise ValueError(
             f"Sun altitude must be positive, got {sun_altitude_deg:.2f}°."
         )
 
-    ground_z_top = dsm.lookup(top_3d[0], top_3d[1])
+    ground_z_top = dtm.lookup(top_3d[0], top_3d[1])
     if ground_z_top is None:
         raise ValueError(
             f"Object top position ({top_3d[0]:.1f}, {top_3d[1]:.1f}) "
-            "falls outside the DSM extent."
+            "falls outside the DTM extent."
         )
 
-    ground_z_tip = dsm.lookup(tip_3d[0], tip_3d[1])
+    ground_z_tip = dtm.lookup(tip_3d[0], tip_3d[1])
     if ground_z_tip is None:
         raise ValueError(
             f"Shadow tip position ({tip_3d[0]:.1f}, {tip_3d[1]:.1f}) "
-            "falls outside the DSM extent."
+            "falls outside the DTM extent."
         )
 
     dx = tip_3d[0] - top_3d[0]
@@ -159,22 +159,23 @@ def compute_height_multi_view(
 def compute_object_top_z_per_image(
     top_xy: np.ndarray,
     tip_ground_points: list[np.ndarray],
-    sun_altitude_deg: float,
+    sun_altitudes_deg: list[float] | float,
 ) -> tuple[float, float, list[float]]:
     """Compute Object Top Z independently from each shadow-tip ground point.
 
     For each tip ground point (from ray-to-ground projection):
         shadow_len = XY distance from top_xy to tip_i
-        object_top_z_i = shadow_len × tan(sun_alt) + tip_z_i
+        object_top_z_i = shadow_len × tan(sun_alt_i) + tip_z_i
 
-    This gives one independent Z estimate per image.  The median is the
-    result; the spread quantifies measurement confidence.
+    Each image uses its own sun altitude computed from that image's EXIF
+    timestamp, accounting for sun movement between flight lines.
 
     Parameters
     ----------
     top_xy : ndarray, shape (2,) or (3,) — [X, Y] of object top from triangulation.
     tip_ground_points : list of ndarray, each shape (3,) — [X, Y, Z] per-image.
-    sun_altitude_deg : float — sun elevation above horizon in degrees.
+    sun_altitudes_deg : list[float] | float — per-image sun elevation(s) above
+        horizon in degrees.  If a single float, used for all images.
 
     Returns
     -------
@@ -182,15 +183,24 @@ def compute_object_top_z_per_image(
     z_spread : float — std (or IQR/2 for N≥4) of per-image Z values.
     per_image_z : list[float] — individual Z estimates for diagnostics.
     """
-    if sun_altitude_deg <= 0:
+    # Normalise to per-image list
+    if isinstance(sun_altitudes_deg, (int, float)):
+        sun_altitudes_deg = [float(sun_altitudes_deg)] * len(tip_ground_points)
+
+    if len(sun_altitudes_deg) != len(tip_ground_points):
         raise ValueError(
-            f"Sun altitude must be positive, got {sun_altitude_deg:.2f}°."
+            f"sun_altitudes_deg length ({len(sun_altitudes_deg)}) != "
+            f"tip_ground_points length ({len(tip_ground_points)})"
         )
 
-    tan_sun = math.tan(math.radians(sun_altitude_deg))
     per_image_z: list[float] = []
 
-    for tip in tip_ground_points:
+    for tip, sun_alt in zip(tip_ground_points, sun_altitudes_deg):
+        if sun_alt <= 0:
+            raise ValueError(
+                f"Sun altitude must be positive, got {sun_alt:.2f}°."
+            )
+        tan_sun = math.tan(math.radians(sun_alt))
         dx = tip[0] - top_xy[0]
         dy = tip[1] - top_xy[1]
         shadow_len = math.sqrt(dx * dx + dy * dy)

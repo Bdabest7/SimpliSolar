@@ -419,33 +419,33 @@ def link_images(project_id: str, req: LinkPathRequest) -> dict:
         raise HTTPException(500, f"Failed to link images: {exc}") from exc
 
 
-@router.post("/{project_id}/link-dsm")
-def link_dsm(project_id: str, req: LinkPathRequest) -> Project:
-    """Point the project at a GeoTIFF DSM/DTM for ground elevation lookup."""
-    log.info("link-dsm: project=%s path=%s", project_id, req.path)
+@router.post("/{project_id}/link-dtm")
+def link_dtm(project_id: str, req: LinkPathRequest) -> Project:
+    """Point the project at a GeoTIFF DTM (bare earth) for ground elevation lookup."""
+    log.info("link-dtm: project=%s path=%s", project_id, req.path)
     path = Path(req.path)
 
     try:
         if not path.exists():
-            raise HTTPException(422, f"DSM file not found: {req.path}")
+            raise HTTPException(422, f"DTM file not found: {req.path}")
         if path.suffix.lower() not in (".tif", ".tiff"):
-            raise HTTPException(422, "DSM must be a GeoTIFF (.tif / .tiff)")
+            raise HTTPException(422, "DTM must be a GeoTIFF (.tif / .tiff)")
 
         # Validate the file is a readable GeoTIFF with coordinate info
-        from backend.ingest.dsm_loader import load_dsm
-        dsm = load_dsm(path)
+        from backend.ingest.dtm_loader import load_dtm
+        dtm = load_dtm(path)
         log.info(
-            "DSM validated: %d×%d pixels  origin=(%.2f, %.2f)",
-            dsm.data.shape[1], dsm.data.shape[0], dsm.x0, dsm.y0,
+            "DTM validated: %d×%d pixels  origin=(%.2f, %.2f)",
+            dtm.data.shape[1], dtm.data.shape[0], dtm.x0, dtm.y0,
         )
 
         project = project_service.load_project(project_id)
-        project.dsm_path = str(path)
+        project.dtm_path = str(path)
         project_service.save_project(project)
         return project
 
     except HTTPException:
         raise
     except Exception as exc:
-        log.error("link-dsm failed: %s\n%s", exc, traceback.format_exc())
-        raise HTTPException(500, f"Failed to link DSM: {exc}") from exc
+        log.error("link-dtm failed: %s\n%s", exc, traceback.format_exc())
+        raise HTTPException(500, f"Failed to link DTM: {exc}") from exc

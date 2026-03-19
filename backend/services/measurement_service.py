@@ -15,7 +15,7 @@ import numpy as np
 from backend.engine.camera_math import pixel_to_ray, ray_to_ground
 from backend.engine.ray_intersection import intersect_rays_robust
 from backend.engine.height_calc import (
-    compute_height, compute_height_dsm, compute_object_top_z_per_image,
+    compute_height, compute_height_dtm, compute_object_top_z_per_image,
 )
 from backend.engine.solar import sun_position
 from backend.ingest.pix4d_parser import load_pix4d_cameras
@@ -144,13 +144,13 @@ def _read_image_exif(image_path: Path) -> dict | None:
 def _compute_per_image_sun_angles(
     image_names: list[str],
     images_dir: Path,
-) -> list[tuple[float, float]]:
+) -> dict[str, tuple[float, float]]:
     """Read EXIF from each image and compute (sun_alt, sun_az) per image.
 
-    Returns a list of (altitude_deg, azimuth_deg) tuples, one per image
-    that successfully produced EXIF + sun position.  Empty if all fail.
+    Returns a dict mapping image_name → (altitude_deg, azimuth_deg) for
+    each image that successfully produced EXIF + sun position.
     """
-    results = []
+    results: dict[str, tuple[float, float]] = {}
     for name in image_names:
         path = images_dir / name
         if not path.exists():
@@ -171,7 +171,7 @@ def _compute_per_image_sun_angles(
                 "Sun angle for %s at %s → alt=%.3f° az=%.3f°",
                 name, meta["timestamp_utc"].isoformat(), alt, az,
             )
-            results.append((alt, az))
+            results[name] = (alt, az)
         except Exception as e:
             log.warning("Sun position failed for %s: %s", name, e)
 
@@ -215,11 +215,11 @@ def run_measurement(
     """Execute the full measurement pipeline for a target.
 
     Pipeline (auto-selected):
-      DSM available  →  per-image ray-to-ground for shadow tips (preferred)
-      No DSM         →  multi-view triangulation fallback
+      DTM available  →  per-image ray-to-ground for shadow tips (preferred)
+      No DTM         →  multi-view triangulation fallback
 
     Object Top Z is the critical measurement:
-      Object Top Z = shadow_length_XY × tan(sun_alt) + DSM(shadow_tip)
+      Object Top Z = shadow_length_XY × tan(sun_alt) + DTM(shadow_tip)
 
     Sun angle strategy:
       Reads EXIF timestamp from each tip-image individually and computes
@@ -245,19 +245,20 @@ def run_measurement(
     # ── Per-image sun angles from tip images ───────────────────────────────────
     tip_image_names = list({m.image_name for m in mark_set.tip_marks})
     images_dir = get_images_dir(project.id)
-    sun_angles = _compute_per_image_sun_angles(tip_image_names, images_dir)
+    sun_angle_map = _compute_per_image_sun_angles(tip_image_names, images_dir)
 
-    if sun_angles:
-        altitudes = [a for a, _ in sun_angles]
-        azimuths  = [z for _, z in sun_angles]
-        sun_alt = float(np.median(altitudes))
+    if sun_angle_map:
+        altitudes = [a for a, _ in sun_angle_map.values()]
+        azimuths  = [z for _, z in sun_angle_map.values()]
+        sun_alt = float(np.median(altitudes))  # median for reporting / fallback
         sun_az  = float(np.median(azimuths))
         log.info(
-            "Sun angles from %d tip image(s): alt=[%s] → median=%.4f°",
-            len(sun_angles),
-            ", ".join(f"{a:.3f}" for a in altitudes),
-            sun_alt,
+            "Per-image sun altitudes from %d tip image(s):",
+            len(sun_angle_map),
         )
+        for img_name, (a, az) in sun_angle_map.items():
+            log.info("  %s → alt=%.4f° az=%.4f°", img_name, a, az)
+        log.info("  median → alt=%.4f° az=%.4f°", sun_alt, sun_az)
     elif capture_time_utc is not None and latitude is not None and longitude is not None:
         log.warning("EXIF unavailable for all tip images — falling back to provided timestamp")
         sun_alt, sun_az = sun_position(capture_time_utc, latitude, longitude)
@@ -268,42 +269,53 @@ def run_measurement(
         )
 
     # ── Shadow tip: per-image ray-to-ground (preferred) or triangulation ──────
-    use_ray_to_ground = bool(project.dsm_path)
-    dsm = None
-    dsm_cell_size = 0.0
+    use_ray_to_ground = bool(project.dtm_path)
+    dtm = None
+    dtm_cell_size = 0.0
 
     if use_ray_to_ground:
-        from backend.ingest.dsm_loader import load_dsm
-        dsm = load_dsm(Path(project.dsm_path))
-        dsm_cell_size = abs(dsm.sx)  # metres per pixel
+        from backend.ingest.dtm_loader import load_dtm
+        dtm = load_dtm(Path(project.dtm_path))
+        dtm_cell_size = abs(dtm.sx)  # metres per pixel
 
         if len(mark_set.tip_marks) < 1:
             raise ValueError(f"Need ≥ 1 Shadow Tip mark, got {len(mark_set.tip_marks)}")
 
-        # Project each tip mark independently to DSM ground surface
+        # Project each tip mark independently to DTM ground surface
         tip_ground_points: list[np.ndarray] = []
+        tip_sun_alts: list[float] = []
         tip_image_labels: list[str] = []
         for m in mark_set.tip_marks:
             cam = cameras.get(m.image_name)
             if cam is None:
                 log.warning("Camera not found for image %s — skipping tip mark", m.image_name)
                 continue
-            pt = ray_to_ground(m.pixel_x, m.pixel_y, cam, dsm)
+            pt = ray_to_ground(m.pixel_x, m.pixel_y, cam, dtm)
             if pt is not None:
                 tip_ground_points.append(pt)
                 tip_image_labels.append(m.image_name)
+                # Use this image's own sun altitude, fall back to median
+                if m.image_name in sun_angle_map:
+                    tip_sun_alts.append(sun_angle_map[m.image_name][0])
+                else:
+                    log.warning(
+                        "No per-image sun angle for %s — using median %.4f°",
+                        m.image_name, sun_alt,
+                    )
+                    tip_sun_alts.append(sun_alt)
             else:
                 log.warning("ray_to_ground failed for tip mark on %s", m.image_name)
 
         if not tip_ground_points:
-            raise ValueError("All tip ray-to-ground projections failed. Check DSM coverage.")
+            raise ValueError("All tip ray-to-ground projections failed. Check DTM coverage.")
 
         n_tip_images = len(tip_ground_points)
 
         # Compute per-image Object Top Z (the critical measurement)
+        # Each image uses its own sun altitude from EXIF timestamp
         top_xy = np.array([top_3d[0], top_3d[1]])
         object_top_z, object_top_z_spread, per_image_z = \
-            compute_object_top_z_per_image(top_xy, tip_ground_points, sun_alt)
+            compute_object_top_z_per_image(top_xy, tip_ground_points, tip_sun_alts)
 
         # Median tip ground point for reporting
         tip_pts = np.array(tip_ground_points)
@@ -318,12 +330,12 @@ def run_measurement(
         else:
             tip_spread = 0.0
 
-        # DSM ground elevation at object top XY
-        ground_z_top = dsm.lookup(top_3d[0], top_3d[1])
+        # DTM ground elevation at object top XY
+        ground_z_top = dtm.lookup(top_3d[0], top_3d[1])
         if ground_z_top is None:
             raise ValueError(
                 f"Object top XY ({top_3d[0]:.1f}, {top_3d[1]:.1f}) "
-                "falls outside DSM extent."
+                "falls outside DTM extent."
             )
 
         # Relative height = Object Top Z - ground elevation at base
@@ -344,8 +356,8 @@ def run_measurement(
             n_tip_images, object_top_z, object_top_z_spread,
             tip_spread, computed_height, ground_z_top,
         )
-        for i, (label, z_i) in enumerate(zip(tip_image_labels, per_image_z)):
-            log.info("  image %s → Object Top Z = %.4f m", label, z_i)
+        for label, z_i, s_alt in zip(tip_image_labels, per_image_z, tip_sun_alts):
+            log.info("  image %s → Object Top Z = %.4f m  (sun_alt=%.4f°)", label, z_i, s_alt)
 
         return Measurement(
             target_id=target_id,
@@ -370,7 +382,7 @@ def run_measurement(
             per_image_object_top_z=per_image_z,
             n_tip_images=n_tip_images,
             method="ray_to_ground",
-            dsm_cell_size=dsm_cell_size,
+            dtm_cell_size=dtm_cell_size,
             timestamp_utc=(
                 sun_angles and
                 f"per-image median of {len(sun_angles)} images"
@@ -378,9 +390,9 @@ def run_measurement(
             ),
         )
 
-    # ── Fallback: full triangulation (no DSM) ─────────────────────────────────
+    # ── Fallback: full triangulation (no DTM) ─────────────────────────────────
     if len(mark_set.tip_marks) < 2:
-        raise ValueError(f"Need ≥ 2 Shadow Tip marks (no DSM), got {len(mark_set.tip_marks)}")
+        raise ValueError(f"Need ≥ 2 Shadow Tip marks (no DTM), got {len(mark_set.tip_marks)}")
 
     tip_3d, tip_residual = _triangulate(mark_set.tip_marks, cameras)
     log.info(

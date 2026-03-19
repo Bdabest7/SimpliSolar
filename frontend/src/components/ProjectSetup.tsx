@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { Project } from "../types";
-import { linkCameraTrack, linkTargets, linkImages, linkDsm, browseFile, browseDirectory, getProjectCrsInfo } from "../api/client";
+import { linkCameraTrack, linkTargets, linkImages, linkDtm, browseFile, browseDirectory, getProjectCrsInfo } from "../api/client";
 import ShadowLoader from "./ShadowLoader";
 
 interface Props {
@@ -30,7 +30,7 @@ export default function ProjectSetup({ project: initialProject, onProjectReady, 
       ? initialProject.image_dir
       : ""
   );
-  const [dsmPath, setDsmPath] = useState(initialProject.dsm_path || "");
+  const [dtmPath, setDtmPath] = useState(initialProject.dtm_path || "");
 
   // Target CSV options
   const [csvLayout, setCsvLayout] = useState("auto");
@@ -51,8 +51,8 @@ export default function ProjectSetup({ project: initialProject, onProjectReady, 
       ? { status: "done", detail: "Previously linked" }
       : IDLE
   );
-  const [dsmStep, setDsmStep] = useState<StepState>(
-    initialProject.dsm_path ? { status: "done", detail: "Previously linked" } : IDLE
+  const [dtmStep, setDtmStep] = useState<StepState>(
+    initialProject.dtm_path ? { status: "done", detail: "Previously linked" } : IDLE
   );
 
   const [log, setLog] = useState<string[]>([]);
@@ -75,7 +75,7 @@ export default function ProjectSetup({ project: initialProject, onProjectReady, 
     cameraStep.status === "running" ||
     targetsStep.status === "running" ||
     imagesStep.status === "running" ||
-    dsmStep.status === "running";
+    dtmStep.status === "running";
 
   async function applyCamera() {
     if (!cameraPath.trim()) return;
@@ -131,18 +131,18 @@ export default function ProjectSetup({ project: initialProject, onProjectReady, 
     }
   }
 
-  async function applyDsm() {
-    if (!dsmPath.trim()) return;
-    setDsmStep({ status: "running", detail: "Validating DSM..." });
-    addLog(`Linking DSM: ${dsmPath}`);
+  async function applyDtm() {
+    if (!dtmPath.trim()) return;
+    setDtmStep({ status: "running", detail: "Validating DTM..." });
+    addLog(`Linking DTM: ${dtmPath}`);
     try {
-      const p = await linkDsm(project.id, dsmPath.trim());
+      const p = await linkDtm(project.id, dtmPath.trim());
       setProject(p);
-      setDsmStep({ status: "done", detail: "DSM linked — using DSM height mode" });
-      addLog("DSM linked successfully");
+      setDtmStep({ status: "done", detail: "DTM linked — using DTM height mode" });
+      addLog("DTM linked successfully");
     } catch (e: any) {
       const msg = e.message || "Unknown error";
-      setDsmStep({ status: "error", detail: msg });
+      setDtmStep({ status: "error", detail: msg });
       addLog(`ERROR: ${msg}`);
     }
   }
@@ -151,7 +151,7 @@ export default function ProjectSetup({ project: initialProject, onProjectReady, 
     cameraStep.status === "done" &&
     targetsStep.status === "done" &&
     imagesStep.status === "done" &&
-    dsmStep.status === "done";
+    dtmStep.status === "done";
 
   function cameraPathLabel() {
     if (format === "pix4dmatic") return "OPF directory path";
@@ -306,23 +306,23 @@ export default function ProjectSetup({ project: initialProject, onProjectReady, 
         />
       </Section>
 
-      {/* ── DSM (required) ── */}
-      <Section label="Ground Elevation Model">
+      {/* ── DTM (required) ── */}
+      <Section label="Bare Earth Terrain Model">
         <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10, marginTop: 0 }}>
-          Required. Height is computed as Object Top elevation minus DSM ground elevation at that XY.
-          The DSM must be in the same projected CRS as your camera track (check CRS info above).
+          Required. A DTM (bare earth raster) provides ground elevation for height computation.
+          Must be in the same projected CRS as your camera track (check CRS info above).
         </p>
         <PathInput
-          label="DSM/DTM GeoTIFF (.tif)"
-          hint="Must cover the project area and match the camera track CRS."
-          value={dsmPath}
-          onChange={setDsmPath}
-          onApply={applyDsm}
+          label="DTM GeoTIFF (.tif)"
+          hint="Bare earth raster — must cover the project area and match the camera track CRS."
+          value={dtmPath}
+          onChange={setDtmPath}
+          onApply={applyDtm}
           onBrowse={async () => {
-            const p = await browseFile("Select DSM/DTM GeoTIFF", "tif");
-            if (p) { setDsmPath(p); setDsmStep(IDLE); }
+            const p = await browseFile("Select DTM GeoTIFF", "tif");
+            if (p) { setDtmPath(p); setDtmStep(IDLE); }
           }}
-          step={dsmStep}
+          step={dtmStep}
           disabled={busy}
         />
       </Section>

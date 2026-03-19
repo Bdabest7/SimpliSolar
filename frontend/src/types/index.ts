@@ -54,7 +54,7 @@ export interface Measurement {
   per_image_object_top_z: number[];
   n_tip_images: number;
   method: string;
-  dsm_cell_size: number;
+  dtm_cell_size: number;
   timestamp_utc: string;
 }
 
@@ -70,7 +70,7 @@ export interface Project {
   camera_track_path: string;
   image_dir: string;
   target_csv: string;
-  dsm_path: string;
+  dtm_path: string;
   // Legacy upload-based fields
   camera_track_file: string;
   target_file: string;

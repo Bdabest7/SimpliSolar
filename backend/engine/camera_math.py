@@ -15,10 +15,10 @@ import numpy as np
 
 from backend.models.camera import CameraIntrinsics, CameraExtrinsics, CameraModel
 
-# TYPE_CHECKING avoids circular import — DSMRaster is only needed for type hints.
+# TYPE_CHECKING avoids circular import — DTMRaster is only needed for type hints.
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from backend.ingest.dsm_loader import DSMRaster
+    from backend.ingest.dtm_loader import DTMRaster
 
 
 def undistort_pixel(
@@ -130,20 +130,20 @@ def ray_to_ground(
     u: float,
     v: float,
     camera: CameraModel,
-    dsm: "DSMRaster",
+    dtm: "DTMRaster",
     max_iter: int = 5,
 ) -> np.ndarray | None:
-    """Project a pixel coordinate onto the DSM ground surface.
+    """Project a pixel coordinate onto the DTM ground surface.
 
-    Iteratively intersects the camera ray with the DSM: start at an initial
+    Iteratively intersects the camera ray with the DTM: start at an initial
     elevation guess, compute where the ray hits that horizontal plane, look
-    up the actual DSM elevation at that XY, and repeat until convergence.
+    up the actual DTM elevation at that XY, and repeat until convergence.
     Converges in 1–2 iterations on smooth terrain.
 
     Returns
     -------
     ndarray, shape (3,) — ground point [X, Y, Z] in world coords, or None
-    if the ray is near-horizontal or the intersection falls outside the DSM.
+    if the ray is near-horizontal or the intersection falls outside the DTM.
     """
     origin, direction = pixel_to_ray(u, v, camera)
 
@@ -151,8 +151,8 @@ def ray_to_ground(
     if abs(direction[2]) < 1e-9:
         return None
 
-    # Initial elevation guess: DSM at camera nadir
-    z_ground = dsm.lookup(origin[0], origin[1])
+    # Initial elevation guess: DTM at camera nadir
+    z_ground = dtm.lookup(origin[0], origin[1])
     if z_ground is None:
         return None
 
@@ -162,7 +162,7 @@ def ray_to_ground(
         x = origin[0] + t * direction[0]
         y = origin[1] + t * direction[1]
 
-        z_new = dsm.lookup(x, y)
+        z_new = dtm.lookup(x, y)
         if z_new is None:
             return None
         if abs(z_new - z_ground) < 0.001:  # converged to <1 mm

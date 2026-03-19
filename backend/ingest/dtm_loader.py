@@ -1,11 +1,11 @@
-"""GeoTIFF DSM (Digital Surface Model) reader.
+"""GeoTIFF DTM (Digital Terrain Model / bare earth) reader.
 
 Provides a lightweight loader for north-up GeoTIFF rasters without
 requiring GDAL or rasterio.  Uses tifffile for raster IO and parses the
 standard GeoTIFF ModelPixelScaleTag + ModelTiepointTag for the affine
 coordinate transform.
 
-The DSM must be in the same projected CRS as the camera track (e.g.
+The DTM must be in the same projected CRS as the camera track (e.g.
 EPSG:6575 Tennessee State Plane) so that world XY coordinates can be
 used to look up ground elevation directly.
 """
@@ -28,8 +28,8 @@ _TRANSFORM_TAG   = 34264   # ModelTransformationTag → 16-element 4×4 matrix
 
 
 @dataclass
-class DSMRaster:
-    """Loaded DSM raster with coordinate transform."""
+class DTMRaster:
+    """Loaded DTM raster with coordinate transform."""
 
     data: np.ndarray   # 2-D array of elevations (rows × cols)
     x0: float          # world X at column 0  (left edge)
@@ -48,7 +48,7 @@ class DSMRaster:
 
         rows, cols = self.data.shape
         if not (0 <= r0 < rows and 0 <= c0 < cols):
-            log.debug("DSM lookup (%.1f, %.1f) → pixel (%.1f, %.1f) out of bounds", x_world, y_world, col_f, row_f)
+            log.debug("DTM lookup (%.1f, %.1f) → pixel (%.1f, %.1f) out of bounds", x_world, y_world, col_f, row_f)
             return None
 
         # Bilinear interpolation between the four nearest pixels
@@ -83,8 +83,8 @@ class DSMRaster:
         return float(z)
 
 
-def load_dsm(path: Path) -> DSMRaster:
-    """Load a GeoTIFF DSM and return a DSMRaster ready for elevation queries.
+def load_dtm(path: Path) -> DTMRaster:
+    """Load a GeoTIFF DTM and return a DTMRaster ready for elevation queries.
 
     Supports the two most common GeoTIFF georeference encodings:
       - ModelPixelScaleTag + ModelTiepointTag  (most common)
@@ -93,12 +93,12 @@ def load_dsm(path: Path) -> DSMRaster:
     Raises ValueError if the file lacks coordinate information.
     """
     path = Path(path)
-    log.info("Loading DSM from: %s", path)
+    log.info("Loading DTM from: %s", path)
 
     with tifffile.TiffFile(str(path)) as tif:
         data = tif.asarray()
 
-        # Collapse any extra dimensions (some DSMs are stored as 3D)
+        # Collapse any extra dimensions (some rasters are stored as 3D)
         while data.ndim > 2:
             data = data[0]
 
@@ -125,10 +125,10 @@ def load_dsm(path: Path) -> DSMRaster:
             y0 = y_tp + j_tp * sy   # sy positive magnitude; row 0 is north
 
             log.info(
-                "DSM: %d×%d pixels  origin=(%.2f, %.2f)  pixel=(%.4f, %.4f m)",
+                "DTM: %d×%d pixels  origin=(%.2f, %.2f)  pixel=(%.4f, %.4f m)",
                 data.shape[1], data.shape[0], x0, y0, sx, sy,
             )
-            return DSMRaster(data=data, x0=x0, y0=y0, sx=sx, sy=-sy, nodata=nodata)
+            return DTMRaster(data=data, x0=x0, y0=y0, sx=sx, sy=-sy, nodata=nodata)
 
         # ── Method 2: ModelTransformationTag (4×4 affine matrix) ─────────────
         tf_tag = tags.get(_TRANSFORM_TAG)
@@ -139,13 +139,13 @@ def load_dsm(path: Path) -> DSMRaster:
             x0  =  float(m[3])
             y0  =  float(m[7])
             log.info(
-                "DSM (transform tag): %d×%d pixels  origin=(%.2f, %.2f)  pixel=(%.4f, %.4f m)",
+                "DTM (transform tag): %d×%d pixels  origin=(%.2f, %.2f)  pixel=(%.4f, %.4f m)",
                 data.shape[1], data.shape[0], x0, y0, sx, sy,
             )
-            return DSMRaster(data=data, x0=x0, y0=y0, sx=sx, sy=sy, nodata=nodata)
+            return DTMRaster(data=data, x0=x0, y0=y0, sx=sx, sy=sy, nodata=nodata)
 
     raise ValueError(
-        f"DSM file '{path.name}' does not contain GeoTIFF coordinate tags "
+        f"DTM file '{path.name}' does not contain GeoTIFF coordinate tags "
         "(ModelPixelScaleTag/ModelTiepointTag or ModelTransformationTag). "
-        "Re-export the DSM from your photogrammetry software with GeoTIFF georeferencing."
+        "Re-export the DTM from your photogrammetry software with GeoTIFF georeferencing."
     )

@@ -38,10 +38,10 @@ export default function MarkingPanel({ project, target, onMeasured }: Props) {
 
   const topCount = markSet.marks.filter((m) => m.mark_type === "base").length;
   const tipCount = markSet.marks.filter((m) => m.mark_type === "tip").length;
-  const hasDsm = Boolean(project.dsm_path);
-  const canCompute = topCount >= 2 && tipCount >= 1 && hasDsm;
+  const hasDtm = Boolean(project.dtm_path);
+  const canCompute = topCount >= 2 && tipCount >= 1 && hasDtm;
 
-  const heightMode = hasDsm ? "DSM" : "No DSM";
+  const heightMode = hasDtm ? "DTM" : "No DTM";
 
   async function handleCompute() {
     setComputing(true);
@@ -85,14 +85,14 @@ export default function MarkingPanel({ project, target, onMeasured }: Props) {
         </button>
         <button onClick={clear}>Clear Marks</button>
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: hasDsm ? "var(--text-muted)" : "var(--danger)" }}>
-          {hasDsm ? "⛰ DSM height" : "⚠ No DSM — add in project setup"}
+        <span style={{ fontSize: 11, color: hasDtm ? "var(--text-muted)" : "var(--danger)" }}>
+          {hasDtm ? "⛰ DTM height" : "⚠ No DTM — add in project setup"}
         </span>
         <button
           className="primary"
           disabled={!canCompute || computing}
           onClick={handleCompute}
-          title={!hasDsm ? "A DSM is required to compute height" : undefined}
+          title={!hasDtm ? "A DTM is required to compute height" : undefined}
         >
           {computing ? "Computing..." : "Compute Height"}
         </button>

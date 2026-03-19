@@ -109,13 +109,13 @@ def get_residuals(project_id: str, target_id: str) -> ResidualsResponse:
     mark_set = _load_marks(project_id, target_id)
     cameras = _load_cameras(project)
 
-    # Load DSM if available (for per-image tip ground projection)
-    dsm = None
-    if project.dsm_path:
+    # Load DTM if available (for per-image tip ground projection)
+    dtm = None
+    if project.dtm_path:
         try:
             from pathlib import Path
-            from backend.ingest.dsm_loader import load_dsm
-            dsm = load_dsm(Path(project.dsm_path))
+            from backend.ingest.dtm_loader import load_dtm
+            dtm = load_dtm(Path(project.dtm_path))
         except Exception:
             pass
 
@@ -154,17 +154,17 @@ def get_residuals(project_id: str, target_id: str) -> ResidualsResponse:
             projected_y=projected_y,
         ))
 
-    # ── Tip marks: per-image ray-to-ground (DSM) or triangulation ────────
+    # ── Tip marks: per-image ray-to-ground (DTM) or triangulation ────────
     tip_marks = mark_set.tip_marks
 
-    if dsm is not None and len(tip_marks) >= 1:
-        # Project each tip to DSM ground, compute deviation from median
+    if dtm is not None and len(tip_marks) >= 1:
+        # Project each tip to DTM ground, compute deviation from median
         import numpy as np
         ground_points: list[tuple[str, float, float, np.ndarray]] = []
         for m in tip_marks:
             cam = cameras.get(m.image_name)
             if cam is not None:
-                pt = ray_to_ground(m.pixel_x, m.pixel_y, cam, dsm)
+                pt = ray_to_ground(m.pixel_x, m.pixel_y, cam, dtm)
                 if pt is not None:
                     ground_points.append((m.image_name, m.pixel_x, m.pixel_y, pt))
 
@@ -181,7 +181,7 @@ def get_residuals(project_id: str, target_id: str) -> ResidualsResponse:
             # ppm = focal_length_px / altitude_above_ground
             cam = cameras.get(m.image_name)
             if cam is not None:
-                ground_z_at_cam = dsm.lookup(cam.extrinsics.x, cam.extrinsics.y)
+                ground_z_at_cam = dtm.lookup(cam.extrinsics.x, cam.extrinsics.y)
                 if ground_z_at_cam is not None:
                     alt_above_ground = cam.extrinsics.z - ground_z_at_cam
                     if alt_above_ground > 1.0:

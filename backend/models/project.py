@@ -58,7 +58,7 @@ class Measurement(BaseModel):
     per_image_object_top_z: list[float] = Field(default_factory=list, description="Per-image Z estimates")
     n_tip_images: int = Field(0, description="Number of tip images contributing")
     method: str = Field("triangulation", description="Pipeline: 'triangulation' or 'ray_to_ground'")
-    dsm_cell_size: float = Field(0.0, description="DSM pixel resolution in metres")
+    dtm_cell_size: float = Field(0.0, description="DTM pixel resolution in metres")
     timestamp_utc: str = Field(description="UTC timestamp used for sun calc")
 
 
@@ -77,7 +77,7 @@ class Project(BaseModel):
     camera_track_path: str = ""  # abs path to OPF dir / cameras.xml / external.txt
     image_dir: str = ""          # abs path to images folder
     target_csv: str = ""         # abs path to target coordinates CSV
-    dsm_path: str = ""           # abs path to GeoTIFF DSM/DTM for ground elevation lookup
+    dtm_path: str = ""           # abs path to GeoTIFF DTM (bare earth) for ground elevation lookup
 
     # Legacy upload-based fields (kept for backward compatibility)
     camera_track_file: str = ""

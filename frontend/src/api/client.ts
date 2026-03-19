@@ -98,12 +98,12 @@ export async function linkImages(
   );
 }
 
-export async function linkDsm(
+export async function linkDtm(
   projectId: string,
   path: string
 ): Promise<Project> {
   return json(
-    await fetch(`${BASE}/projects/${projectId}/link-dsm`, {
+    await fetch(`${BASE}/projects/${projectId}/link-dtm`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path }),
