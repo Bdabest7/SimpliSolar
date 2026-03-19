@@ -147,9 +147,16 @@ def _compute_per_image_sun_angles(
 ) -> dict[str, tuple[float, float]]:
     """Read EXIF from each image and compute (sun_alt, sun_az) per image.
 
+    Includes atmospheric refraction correction: looks up historical weather
+    (temperature + pressure) from Open-Meteo, falling back to ISA standard
+    atmosphere.  The refraction shifts apparent sun altitude by ~34′ at the
+    horizon and <1′ above 45°.
+
     Returns a dict mapping image_name → (altitude_deg, azimuth_deg) for
     each image that successfully produced EXIF + sun position.
     """
+    from backend.engine.atmosphere import get_refraction_params
+
     results: dict[str, tuple[float, float]] = {}
     for name in image_names:
         path = images_dir / name
@@ -161,15 +168,23 @@ def _compute_per_image_sun_angles(
             log.warning("Could not read EXIF from %s", name)
             continue
         try:
+            temp_c, pres_mbar = get_refraction_params(
+                meta["latitude"],
+                meta["longitude"],
+                meta["altitude_msl"],
+                meta["timestamp_utc"],
+            )
             alt, az = sun_position(
                 meta["timestamp_utc"],
                 meta["latitude"],
                 meta["longitude"],
                 meta["altitude_msl"],
+                temperature_C=temp_c,
+                pressure_mbar=pres_mbar,
             )
             log.info(
-                "Sun angle for %s at %s → alt=%.3f° az=%.3f°",
-                name, meta["timestamp_utc"].isoformat(), alt, az,
+                "Sun angle for %s at %s → alt=%.3f° az=%.3f° (%.1f°C, %.0f mbar)",
+                name, meta["timestamp_utc"].isoformat(), alt, az, temp_c, pres_mbar,
             )
             results[name] = (alt, az)
         except Exception as e:
@@ -261,7 +276,12 @@ def run_measurement(
         log.info("  median → alt=%.4f° az=%.4f°", sun_alt, sun_az)
     elif capture_time_utc is not None and latitude is not None and longitude is not None:
         log.warning("EXIF unavailable for all tip images — falling back to provided timestamp")
-        sun_alt, sun_az = sun_position(capture_time_utc, latitude, longitude)
+        from backend.engine.atmosphere import get_refraction_params
+        temp_c, pres_mbar = get_refraction_params(latitude, longitude, 0.0, capture_time_utc)
+        sun_alt, sun_az = sun_position(
+            capture_time_utc, latitude, longitude,
+            temperature_C=temp_c, pressure_mbar=pres_mbar,
+        )
     else:
         raise ValueError(
             "Could not read EXIF from any tip image and no fallback timestamp was provided. "
@@ -384,8 +404,8 @@ def run_measurement(
             method="ray_to_ground",
             dtm_cell_size=dtm_cell_size,
             timestamp_utc=(
-                sun_angles and
-                f"per-image median of {len(sun_angles)} images"
+                sun_angle_map and
+                f"per-image median of {len(sun_angle_map)} images"
                 or (capture_time_utc.isoformat() if capture_time_utc else "unknown")
             ),
         )
@@ -437,8 +457,8 @@ def run_measurement(
         object_top_z_spread=0.0,
         method="triangulation",
         timestamp_utc=(
-            sun_angles and
-            f"per-image median of {len(sun_angles)} images"
+            sun_angle_map and
+            f"per-image median of {len(sun_angle_map)} images"
             or (capture_time_utc.isoformat() if capture_time_utc else "unknown")
         ),
     )

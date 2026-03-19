@@ -26,6 +26,8 @@ def sun_position(
     latitude: float,
     longitude: float,
     elevation_m: float = 0.0,
+    temperature_C: float | None = None,
+    pressure_mbar: float | None = None,
 ) -> tuple[float, float]:
     """Return sun (altitude_deg, azimuth_deg) for a location and time.
 
@@ -39,11 +41,19 @@ def sun_position(
         WGS84 longitude in decimal degrees.
     elevation_m : float
         Observer elevation above WGS84 ellipsoid in metres.
+    temperature_C : float | None
+        Air temperature in °C for atmospheric refraction correction.
+        If both temperature_C and pressure_mbar are provided, Skyfield
+        applies the Bennett refraction model (~34′ at horizon, <1′ above 45°).
+        If omitted, returns the geometric (unrefracted) altitude.
+    pressure_mbar : float | None
+        Atmospheric pressure in millibars for refraction correction.
 
     Returns
     -------
     altitude_deg : float
         Sun elevation above horizon in degrees (0 = horizon, 90 = zenith).
+        Includes atmospheric refraction when temperature/pressure are given.
     azimuth_deg : float
         Sun azimuth in degrees clockwise from north.
     """
@@ -57,6 +67,13 @@ def sun_position(
     observer = earth + wgs84.latlon(latitude, longitude, elevation_m)
     t = ts.from_datetime(utc_time)
     apparent = observer.at(t).observe(sun).apparent()
-    alt, az, _ = apparent.altaz()
+
+    if temperature_C is not None and pressure_mbar is not None:
+        alt, az, _ = apparent.altaz(
+            temperature_C=temperature_C,
+            pressure_mbar=pressure_mbar,
+        )
+    else:
+        alt, az, _ = apparent.altaz()
 
     return alt.degrees, az.degrees
