@@ -264,6 +264,18 @@ export async function getResiduals(
   }
 }
 
+export async function undoLastMark(
+  projectId: string,
+  targetId: string
+): Promise<MarkSet> {
+  return json(
+    await fetch(
+      `${BASE}/projects/${projectId}/targets/${targetId}/marks/last`,
+      { method: "DELETE" }
+    )
+  );
+}
+
 export async function clearMarks(
   projectId: string,
   targetId: string

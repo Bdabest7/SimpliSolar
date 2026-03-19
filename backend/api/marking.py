@@ -38,8 +38,17 @@ def get_marks(project_id: str, target_id: str) -> MarkSet:
 
 @router.post("/")
 def add_mark(project_id: str, target_id: str, mark: ImageMark) -> MarkSet:
-    """Add a single mark (base or tip) to a target."""
+    """Add a single mark (base or tip) to a target.
+
+    Enforces one mark per type per image: if a mark of the same type
+    already exists for the same image, it is replaced.
+    """
     mark_set = _load_marks(project_id, target_id)
+    # Remove any existing mark of the same type on the same image
+    mark_set.marks = [
+        m for m in mark_set.marks
+        if not (m.image_name == mark.image_name and m.mark_type == mark.mark_type)
+    ]
     mark_set.marks.append(mark)
     save_marks(project_id, mark_set)
 
@@ -58,6 +67,16 @@ def replace_marks(project_id: str, target_id: str, mark_set: MarkSet) -> MarkSet
     """Replace all marks for a target."""
     mark_set.target_id = target_id
     save_marks(project_id, mark_set)
+    return mark_set
+
+
+@router.delete("/last")
+def undo_last_mark(project_id: str, target_id: str) -> MarkSet:
+    """Remove the most recently added mark."""
+    mark_set = _load_marks(project_id, target_id)
+    if mark_set.marks:
+        mark_set.marks.pop()
+        save_marks(project_id, mark_set)
     return mark_set
 
 

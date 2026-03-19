@@ -1,2 +1,5 @@
 @echo off
-powershell -ExecutionPolicy Bypass -File "%~dp0start.ps1"
+title SimpliSolar
+cd /d "%~dp0"
+python launcher.py %*
+pause

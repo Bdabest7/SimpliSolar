@@ -32,11 +32,26 @@ function Wait-Http($url, $timeoutSec = 40) {
     return $false
 }
 
+function Wait-Port($port, $timeoutSec = 40) {
+    # Wait for a TCP port to start listening (more reliable for Vite dev server)
+    $deadline = (Get-Date).AddSeconds($timeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+        if ($conn) { return $true }
+        Start-Sleep -Milliseconds 600
+    }
+    return $false
+}
+
 # ── Stop any running instances ────────────────────────────────────────────────
 
 Write-Host ""
-Write-Host "  SimpliSolar" -ForegroundColor Cyan
-Write-Host "  ===========" -ForegroundColor Cyan
+Write-Host "  ███████╗██╗███╗   ███╗██████╗ ██╗     ██╗███████╗ ██████╗ ██╗      █████╗ ██████╗ " -ForegroundColor Cyan
+Write-Host "  ██╔════╝██║████╗ ████║██╔══██╗██║     ██║██╔════╝██╔═══██╗██║     ██╔══██╗██╔══██╗" -ForegroundColor Cyan
+Write-Host "  ███████╗██║██╔████╔██║██████╔╝██║     ██║███████╗██║   ██║██║     ███████║██████╔╝" -ForegroundColor Cyan
+Write-Host "  ╚════██║██║██║╚██╔╝██║██╔═══╝ ██║     ██║╚════██║██║   ██║██║     ██╔══██║██╔══██╗" -ForegroundColor Cyan
+Write-Host "  ███████║██║██║ ╚═╝ ██║██║     ███████╗██║███████║╚██████╔╝███████╗██║  ██║██║  ██║" -ForegroundColor Cyan
+Write-Host "  ╚══════╝╚═╝╚═╝     ╚═╝╚═╝     ╚══════╝╚═╝╚══════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Stopping any running instances..." -ForegroundColor Gray
 
@@ -76,7 +91,9 @@ Write-Host "Starting frontend on port $FRONTEND_PORT..." -ForegroundColor Green
 Start-Process cmd -ArgumentList "/K", "cd /d `"$ROOT\frontend`" && npm run dev" -WindowStyle Normal
 
 Write-Host "  Waiting for frontend..." -ForegroundColor Gray
-if (Wait-Http "http://127.0.0.1:$FRONTEND_PORT" 40) {
+# Use port check instead of HTTP — Vite's dev server doesn't always respond
+# to PowerShell's Invoke-WebRequest reliably.
+if (Wait-Port $FRONTEND_PORT 40) {
     Write-Host "  Frontend is up." -ForegroundColor Green
 } else {
     Write-Host ""

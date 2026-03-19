@@ -18,7 +18,7 @@ export default function MarkingPanel({ project, target, onMeasured }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [residuals, setResiduals] = useState<MarkResidual[]>([]);
 
-  const { markSet, add, clear, refresh } = useMarking(project.id, target.id);
+  const { markSet, add, undo, clear, refresh } = useMarking(project.id, target.id);
 
   useEffect(() => {
     refresh();
@@ -75,6 +75,13 @@ export default function MarkingPanel({ project, target, onMeasured }: Props) {
           title="Mark the tip of the shadow on the ground"
         >
           Shadow Tip ({tipCount})
+        </button>
+        <button
+          onClick={undo}
+          disabled={markSet.marks.length === 0}
+          title="Undo the last mark placed"
+        >
+          Undo
         </button>
         <button onClick={clear}>Clear Marks</button>
         <div style={{ flex: 1 }} />

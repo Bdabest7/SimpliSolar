@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import type { MarkSet, ImageMark, MarkType } from "../types";
-import { getMarks, addMark, clearMarks, replaceMarks } from "../api/client";
+import { getMarks, addMark, clearMarks, replaceMarks, undoLastMark } from "../api/client";
 
 export function useMarking(projectId: string, targetId: string) {
   const [markSet, setMarkSet] = useState<MarkSet>({ target_id: targetId, marks: [] });
@@ -31,6 +31,11 @@ export function useMarking(projectId: string, targetId: string) {
     [projectId, targetId]
   );
 
+  const undo = useCallback(async () => {
+    const ms = await undoLastMark(projectId, targetId);
+    setMarkSet(ms);
+  }, [projectId, targetId]);
+
   const clear = useCallback(async () => {
     const ms = await clearMarks(projectId, targetId);
     setMarkSet(ms);
@@ -47,5 +52,5 @@ export function useMarking(projectId: string, targetId: string) {
     [projectId, targetId]
   );
 
-  return { markSet, loading, refresh, add, clear, replace };
+  return { markSet, loading, refresh, add, undo, clear, replace };
 }
