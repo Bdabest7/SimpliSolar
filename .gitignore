@@ -1,14 +1,29 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
-.env
-data/*
-!data/.gitkeep
-node_modules/
-dist/
-.vite/
 *.egg-info/
 .pytest_cache/
 venv/
 .venv/
+
+# Skyfield ephemeris (auto-downloaded at runtime)
+*.bsp
+
+# Environment
+.env
+
+# Project data (user-specific)
+data/*
+!data/.gitkeep
+
+# Frontend
+node_modules/
+dist/
+.vite/
+
+# IDE / tools
 .claude
+.vscode/
+*.swp
+*.swo
