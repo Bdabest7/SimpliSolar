@@ -154,3 +154,58 @@ def compute_height_multi_view(
         spread = float(np.std(heights_arr))
 
     return median_h, spread
+
+
+def compute_object_top_z_per_image(
+    top_xy: np.ndarray,
+    tip_ground_points: list[np.ndarray],
+    sun_altitude_deg: float,
+) -> tuple[float, float, list[float]]:
+    """Compute Object Top Z independently from each shadow-tip ground point.
+
+    For each tip ground point (from ray-to-ground projection):
+        shadow_len = XY distance from top_xy to tip_i
+        object_top_z_i = shadow_len × tan(sun_alt) + tip_z_i
+
+    This gives one independent Z estimate per image.  The median is the
+    result; the spread quantifies measurement confidence.
+
+    Parameters
+    ----------
+    top_xy : ndarray, shape (2,) or (3,) — [X, Y] of object top from triangulation.
+    tip_ground_points : list of ndarray, each shape (3,) — [X, Y, Z] per-image.
+    sun_altitude_deg : float — sun elevation above horizon in degrees.
+
+    Returns
+    -------
+    median_z : float — median Object Top Z across images.
+    z_spread : float — std (or IQR/2 for N≥4) of per-image Z values.
+    per_image_z : list[float] — individual Z estimates for diagnostics.
+    """
+    if sun_altitude_deg <= 0:
+        raise ValueError(
+            f"Sun altitude must be positive, got {sun_altitude_deg:.2f}°."
+        )
+
+    tan_sun = math.tan(math.radians(sun_altitude_deg))
+    per_image_z: list[float] = []
+
+    for tip in tip_ground_points:
+        dx = tip[0] - top_xy[0]
+        dy = tip[1] - top_xy[1]
+        shadow_len = math.sqrt(dx * dx + dy * dy)
+        object_top_z = shadow_len * tan_sun + float(tip[2])
+        per_image_z.append(object_top_z)
+
+    z_arr = np.array(per_image_z)
+    median_z = float(np.median(z_arr))
+
+    if len(z_arr) >= 4:
+        q75, q25 = np.percentile(z_arr, [75, 25])
+        z_spread = (q75 - q25) / 2.0
+    elif len(z_arr) >= 2:
+        z_spread = float(np.std(z_arr))
+    else:
+        z_spread = 0.0  # single image — no cross-check possible
+
+    return median_z, float(z_spread), per_image_z

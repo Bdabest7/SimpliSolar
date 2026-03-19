@@ -39,7 +39,7 @@ def serve_image(project_id: str, image_name: str):
 
 
 @router.get("/covering/{target_id}")
-def get_covering_images(project_id: str, target_id: str, max_images: int = 4) -> list[str]:
+def get_covering_images(project_id: str, target_id: str, max_images: int = 15) -> list[str]:
     """Find images that cover a specific target."""
     project = project_service.load_project(project_id)
     target = next((t for t in project.targets if t.id == target_id), None)

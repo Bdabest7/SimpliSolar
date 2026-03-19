@@ -33,14 +33,21 @@ def export_csv(project_id: str, format: str = "pix4d"):
 
     records = []
     for m in project.measurements:
-        top_z = m.base_z + m.computed_height
+        # Use the explicit object_top_z when available (ray-to-ground pipeline),
+        # fall back to base_z + computed_height for legacy measurements.
+        top_z = m.object_top_z if m.object_top_z != 0.0 else (m.base_z + m.computed_height)
+        # Horizontal accuracy: object top XY triangulation residual
+        horz_acc = m.top_residual if m.top_residual > 0 else m.confidence
+        # Vertical accuracy: per-image Object Top Z spread (ray_to_ground),
+        # or legacy confidence for triangulation-mode measurements
+        vert_acc = m.object_top_z_spread if m.object_top_z_spread > 0 else m.confidence
         records.append(GCPRecord(
             label=m.target_id,
             x=m.base_x,
             y=m.base_y,
             z=top_z,
-            horz_accuracy=m.confidence,
-            vert_accuracy=m.confidence,
+            horz_accuracy=horz_acc,
+            vert_accuracy=vert_acc,
         ))
 
     output = io.StringIO()

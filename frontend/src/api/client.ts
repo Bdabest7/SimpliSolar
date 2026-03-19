@@ -244,6 +244,8 @@ export interface MarkResidual {
   reprojection_px: number | null;
   projected_x: number | null;
   projected_y: number | null;
+  ground_deviation_m: number | null;
+  pixels_per_meter: number | null;
 }
 
 export async function getResiduals(

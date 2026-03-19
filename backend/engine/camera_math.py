@@ -15,6 +15,11 @@ import numpy as np
 
 from backend.models.camera import CameraIntrinsics, CameraExtrinsics, CameraModel
 
+# TYPE_CHECKING avoids circular import — DSMRaster is only needed for type hints.
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from backend.ingest.dsm_loader import DSMRaster
+
 
 def undistort_pixel(
     u: float,
@@ -119,3 +124,50 @@ def project_point(
     if 0 <= u < k.image_width and 0 <= v < k.image_height:
         return u, v
     return None
+
+
+def ray_to_ground(
+    u: float,
+    v: float,
+    camera: CameraModel,
+    dsm: "DSMRaster",
+    max_iter: int = 5,
+) -> np.ndarray | None:
+    """Project a pixel coordinate onto the DSM ground surface.
+
+    Iteratively intersects the camera ray with the DSM: start at an initial
+    elevation guess, compute where the ray hits that horizontal plane, look
+    up the actual DSM elevation at that XY, and repeat until convergence.
+    Converges in 1–2 iterations on smooth terrain.
+
+    Returns
+    -------
+    ndarray, shape (3,) — ground point [X, Y, Z] in world coords, or None
+    if the ray is near-horizontal or the intersection falls outside the DSM.
+    """
+    origin, direction = pixel_to_ray(u, v, camera)
+
+    # Guard against horizontal rays (direction[2] ≈ 0)
+    if abs(direction[2]) < 1e-9:
+        return None
+
+    # Initial elevation guess: DSM at camera nadir
+    z_ground = dsm.lookup(origin[0], origin[1])
+    if z_ground is None:
+        return None
+
+    x, y = origin[0], origin[1]
+    for _ in range(max_iter):
+        t = (z_ground - origin[2]) / direction[2]
+        x = origin[0] + t * direction[0]
+        y = origin[1] + t * direction[1]
+
+        z_new = dsm.lookup(x, y)
+        if z_new is None:
+            return None
+        if abs(z_new - z_ground) < 0.001:  # converged to <1 mm
+            return np.array([x, y, z_new])
+        z_ground = z_new
+
+    # Return best estimate even if not fully converged
+    return np.array([x, y, z_ground])

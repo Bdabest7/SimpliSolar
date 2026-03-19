@@ -12,9 +12,11 @@ from pathlib import Path
 
 import numpy as np
 
-from backend.engine.camera_math import pixel_to_ray
+from backend.engine.camera_math import pixel_to_ray, ray_to_ground
 from backend.engine.ray_intersection import intersect_rays_robust
-from backend.engine.height_calc import compute_height, compute_height_dsm
+from backend.engine.height_calc import (
+    compute_height, compute_height_dsm, compute_object_top_z_per_image,
+)
 from backend.engine.solar import sun_position
 from backend.ingest.pix4d_parser import load_pix4d_cameras
 from backend.ingest.metashape_parser import load_metashape_cameras
@@ -77,7 +79,7 @@ def save_marks(project_id: str, mark_set: MarkSet) -> None:
 def get_covering_images(
     project: Project,
     target: Target,
-    max_images: int = 4,
+    max_images: int = 15,
 ) -> list[str]:
     cameras = _load_cameras(project)
     from backend.ingest.image_index import find_covering_images
@@ -212,33 +214,32 @@ def run_measurement(
 ) -> Measurement:
     """Execute the full measurement pipeline for a target.
 
-    Height calculation strategy (auto-selected):
-      DSM available  →  top_3d.z  minus  DSM ground elevation at top XY
-      Base marks     →  shadow_length_horizontal × tan(sun_alt) + Δz terrain correction
-      (DSM takes priority if configured)
+    Pipeline (auto-selected):
+      DSM available  →  per-image ray-to-ground for shadow tips (preferred)
+      No DSM         →  multi-view triangulation fallback
+
+    Object Top Z is the critical measurement:
+      Object Top Z = shadow_length_XY × tan(sun_alt) + DSM(shadow_tip)
 
     Sun angle strategy:
       Reads EXIF timestamp from each tip-image individually and computes
       the sun angle at that exact moment.  Uses the median sun altitude
-      across tip images, so battery changes between images are handled
-      gracefully.  Falls back to the provided capture_time_utc if EXIF
-      reading fails for all images.
+      across tip images.  Falls back to the provided capture_time_utc if
+      EXIF reading fails for all images.
     """
+    import math
+
     cameras = _load_cameras(project)
     mark_set = _load_marks(project.id, target_id)
 
     if len(mark_set.base_marks) < 2:
         raise ValueError(f"Need ≥ 2 Object Top marks, got {len(mark_set.base_marks)}")
-    if len(mark_set.tip_marks) < 2:
-        raise ValueError(f"Need ≥ 2 Shadow Tip marks, got {len(mark_set.tip_marks)}")
 
-    # ── Triangulate 3D positions ───────────────────────────────────────────────
+    # ── Triangulate Object Top (XY from multi-view) ────────────────────────────
     top_3d, top_residual = _triangulate(mark_set.base_marks, cameras)
-    tip_3d, tip_residual = _triangulate(mark_set.tip_marks, cameras)
     log.info(
-        "Triangulation → top=(%.3f, %.3f, %.3f) residual=%.4f m  "
-        "tip=(%.3f, %.3f, %.3f) residual=%.4f m",
-        *top_3d, top_residual, *tip_3d, tip_residual,
+        "Object top triangulation → (%.3f, %.3f, %.3f) residual=%.4f m",
+        *top_3d, top_residual,
     )
 
     # ── Per-image sun angles from tip images ───────────────────────────────────
@@ -266,33 +267,140 @@ def run_measurement(
             "Ensure the images directory is correct and images contain GPS/timestamp data."
         )
 
-    # ── Height calculation ─────────────────────────────────────────────────────
-    # Always use shadow-length formula.  Triangulated Z from aerial imagery is
-    # unreliable (rays nearly parallel vertically → Z drifts to camera altitude).
-    # DSM provides terrain slope correction; without DSM, triangulated Δz is used.
-    if project.dsm_path:
+    # ── Shadow tip: per-image ray-to-ground (preferred) or triangulation ──────
+    use_ray_to_ground = bool(project.dsm_path)
+    dsm = None
+    dsm_cell_size = 0.0
+
+    if use_ray_to_ground:
         from backend.ingest.dsm_loader import load_dsm
-        log.info("Using shadow-length + DSM slope correction: %s", project.dsm_path)
         dsm = load_dsm(Path(project.dsm_path))
-        computed_height, ground_z_top, ground_z_tip = compute_height_dsm(
-            top_3d, tip_3d, sun_alt, dsm,
-        )
+        dsm_cell_size = abs(dsm.sx)  # metres per pixel
+
+        if len(mark_set.tip_marks) < 1:
+            raise ValueError(f"Need ≥ 1 Shadow Tip mark, got {len(mark_set.tip_marks)}")
+
+        # Project each tip mark independently to DSM ground surface
+        tip_ground_points: list[np.ndarray] = []
+        tip_image_labels: list[str] = []
+        for m in mark_set.tip_marks:
+            cam = cameras.get(m.image_name)
+            if cam is None:
+                log.warning("Camera not found for image %s — skipping tip mark", m.image_name)
+                continue
+            pt = ray_to_ground(m.pixel_x, m.pixel_y, cam, dsm)
+            if pt is not None:
+                tip_ground_points.append(pt)
+                tip_image_labels.append(m.image_name)
+            else:
+                log.warning("ray_to_ground failed for tip mark on %s", m.image_name)
+
+        if not tip_ground_points:
+            raise ValueError("All tip ray-to-ground projections failed. Check DSM coverage.")
+
+        n_tip_images = len(tip_ground_points)
+
+        # Compute per-image Object Top Z (the critical measurement)
+        top_xy = np.array([top_3d[0], top_3d[1]])
+        object_top_z, object_top_z_spread, per_image_z = \
+            compute_object_top_z_per_image(top_xy, tip_ground_points, sun_alt)
+
+        # Median tip ground point for reporting
+        tip_pts = np.array(tip_ground_points)
+        median_tip = np.median(tip_pts, axis=0)
+
+        # Tip spread: std of XY distance from median
+        if len(tip_ground_points) >= 2:
+            tip_dists = [float(np.sqrt(
+                (p[0] - median_tip[0])**2 + (p[1] - median_tip[1])**2
+            )) for p in tip_ground_points]
+            tip_spread = float(np.std(tip_dists))
+        else:
+            tip_spread = 0.0
+
+        # DSM ground elevation at object top XY
+        ground_z_top = dsm.lookup(top_3d[0], top_3d[1])
+        if ground_z_top is None:
+            raise ValueError(
+                f"Object top XY ({top_3d[0]:.1f}, {top_3d[1]:.1f}) "
+                "falls outside DSM extent."
+            )
+
+        # Relative height = Object Top Z - ground elevation at base
+        computed_height = object_top_z - ground_z_top
+
+        # Shadow length from triangulated top XY to median tip XY
+        shadow_length_h = float(np.sqrt(
+            (median_tip[0] - top_3d[0])**2 + (median_tip[1] - top_3d[1])**2
+        ))
+
+        # Legacy confidence fields (for backward compat)
+        tip_residual = tip_spread
+        confidence = float(np.sqrt(top_residual**2 + tip_spread**2))
+
         log.info(
-            "DSM-corrected height: shadow=%.3f m  DSM(top)=%.3f  DSM(tip)=%.3f  "
-            "slope=%.3f m  height=%.4f m",
-            float(np.sqrt((tip_3d[0]-top_3d[0])**2 + (tip_3d[1]-top_3d[1])**2)),
-            ground_z_top, ground_z_tip,
-            ground_z_tip - ground_z_top,
-            computed_height,
+            "Per-image ray-to-ground → %d tips  Object Top Z=%.4f  spread=%.4f m  "
+            "tip_spread=%.4f m  height=%.4f m  ground_z=%.3f",
+            n_tip_images, object_top_z, object_top_z_spread,
+            tip_spread, computed_height, ground_z_top,
         )
-    else:
-        log.info("Using shadow-length height method (no DSM, triangulated Δz)")
-        computed_height = compute_height(top_3d, tip_3d, sun_alt)
-        ground_z_top = float(top_3d[2])
-        ground_z_tip = float(tip_3d[2])
-        log.info("Shadow height: %.4f m", computed_height)
+        for i, (label, z_i) in enumerate(zip(tip_image_labels, per_image_z)):
+            log.info("  image %s → Object Top Z = %.4f m", label, z_i)
+
+        return Measurement(
+            target_id=target_id,
+            base_x=float(top_3d[0]),
+            base_y=float(top_3d[1]),
+            base_z=float(ground_z_top),
+            tip_x=float(median_tip[0]),
+            tip_y=float(median_tip[1]),
+            tip_z=float(median_tip[2]),
+            shadow_length_horizontal=shadow_length_h,
+            sun_altitude_deg=sun_alt,
+            sun_azimuth_deg=sun_az,
+            computed_height=computed_height,
+            confidence=confidence,
+            top_residual=float(top_residual),
+            tip_residual=float(tip_residual),
+            shadow_length_confidence=confidence,
+            height_confidence=object_top_z_spread,
+            object_top_z=object_top_z,
+            object_top_z_spread=object_top_z_spread,
+            tip_spread=tip_spread,
+            per_image_object_top_z=per_image_z,
+            n_tip_images=n_tip_images,
+            method="ray_to_ground",
+            dsm_cell_size=dsm_cell_size,
+            timestamp_utc=(
+                sun_angles and
+                f"per-image median of {len(sun_angles)} images"
+                or (capture_time_utc.isoformat() if capture_time_utc else "unknown")
+            ),
+        )
+
+    # ── Fallback: full triangulation (no DSM) ─────────────────────────────────
+    if len(mark_set.tip_marks) < 2:
+        raise ValueError(f"Need ≥ 2 Shadow Tip marks (no DSM), got {len(mark_set.tip_marks)}")
+
+    tip_3d, tip_residual = _triangulate(mark_set.tip_marks, cameras)
+    log.info(
+        "Shadow tip triangulation → (%.3f, %.3f, %.3f) residual=%.4f m",
+        *tip_3d, tip_residual,
+    )
+
+    computed_height = compute_height(top_3d, tip_3d, sun_alt)
+    ground_z_top = float(top_3d[2])
+    ground_z_tip = float(tip_3d[2])
+    object_top_z = ground_z_top + computed_height
 
     confidence = float(np.sqrt(top_residual**2 + tip_residual**2))
+    tan_sun = math.tan(math.radians(sun_alt))
+    shadow_length_confidence = confidence
+    height_confidence = float(np.sqrt(
+        (tan_sun * shadow_length_confidence) ** 2 + confidence ** 2
+    ))
+
+    log.info("Triangulation fallback → height=%.4f m  confidence=%.4f m", computed_height, confidence)
 
     return Measurement(
         target_id=target_id,
@@ -309,6 +417,13 @@ def run_measurement(
         sun_azimuth_deg=sun_az,
         computed_height=computed_height,
         confidence=confidence,
+        top_residual=float(top_residual),
+        tip_residual=float(tip_residual),
+        shadow_length_confidence=shadow_length_confidence,
+        height_confidence=height_confidence,
+        object_top_z=object_top_z,
+        object_top_z_spread=0.0,
+        method="triangulation",
         timestamp_utc=(
             sun_angles and
             f"per-image median of {len(sun_angles)} images"

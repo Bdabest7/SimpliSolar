@@ -39,7 +39,7 @@ export default function MarkingPanel({ project, target, onMeasured }: Props) {
   const topCount = markSet.marks.filter((m) => m.mark_type === "base").length;
   const tipCount = markSet.marks.filter((m) => m.mark_type === "tip").length;
   const hasDsm = Boolean(project.dsm_path);
-  const canCompute = topCount >= 2 && tipCount >= 2 && hasDsm;
+  const canCompute = topCount >= 2 && tipCount >= 1 && hasDsm;
 
   const heightMode = hasDsm ? "DSM" : "No DSM";
 
@@ -57,7 +57,7 @@ export default function MarkingPanel({ project, target, onMeasured }: Props) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", minHeight: 0 }}>
       <div className="toolbar">
         <span style={{ fontSize: 13, fontWeight: 500 }}>
           {target.label || target.id}
@@ -99,7 +99,7 @@ export default function MarkingPanel({ project, target, onMeasured }: Props) {
             No covering images found. Ensure camera track and images are uploaded.
           </div>
         ) : (
-          coveringImages.slice(0, 4).map((name) => (
+          coveringImages.map((name) => (
             <ImageViewer
               key={name}
               imageUrl={imageUrl(project.id, name)}

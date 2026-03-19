@@ -43,6 +43,18 @@ export interface Measurement {
   sun_azimuth_deg: number;
   computed_height: number;
   confidence: number;
+  top_residual: number;
+  tip_residual: number;
+  shadow_length_confidence: number;
+  height_confidence: number;
+  // Per-image ray-to-ground fields
+  object_top_z: number;
+  object_top_z_spread: number;
+  tip_spread: number;
+  per_image_object_top_z: number[];
+  n_tip_images: number;
+  method: string;
+  dsm_cell_size: number;
   timestamp_utc: string;
 }
 

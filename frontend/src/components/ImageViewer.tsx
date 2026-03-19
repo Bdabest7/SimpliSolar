@@ -104,7 +104,7 @@ export default function ImageViewer({
       ctx.lineWidth = 0.8 / transform.scale;
       ctx.stroke();
 
-      // Reprojection indicator: draw the back-projected point + a line to the mark
+      // Residual indicator for this mark
       const res = residuals.find(
         (res) =>
           res.image_name === imageName &&
@@ -112,6 +112,44 @@ export default function ImageViewer({
           Math.abs(res.pixel_x - mark.pixel_x) < 0.5 &&
           Math.abs(res.pixel_y - mark.pixel_y) < 0.5
       );
+
+      // Tip marks with ground_deviation_m: draw confidence circle
+      if (res?.ground_deviation_m != null) {
+        const dev = res.ground_deviation_m;
+        const circleColor =
+          dev < 0.03
+            ? "#22c55e"   // green  — <30mm
+            : dev < 0.1
+            ? "#eab308"   // yellow — 30–100mm
+            : "#ef4444";  // red    — >100mm
+
+        // Convert ground deviation (metres) to image pixels using camera GSD.
+        // pixels_per_meter = focal_length_px / altitude_above_ground
+        // Circle radius in image pixels = deviation_m * pixels_per_meter
+        const ppm = res.pixels_per_meter;
+        const circleR = ppm != null
+          ? Math.max(r * 1.5, dev * ppm)
+          : Math.max(r * 1.5, r * 4); // fallback: fixed size if no ppm
+
+        ctx.beginPath();
+        ctx.arc(mark.pixel_x, mark.pixel_y, circleR, 0, Math.PI * 2);
+        ctx.fillStyle = circleColor + "20"; // very translucent fill
+        ctx.fill();
+        ctx.strokeStyle = circleColor;
+        ctx.lineWidth = 1.5 / transform.scale;
+        ctx.stroke();
+
+        // Label with deviation in mm
+        ctx.font = `${Math.max(10, 12 / transform.scale)}px monospace`;
+        ctx.fillStyle = circleColor;
+        ctx.fillText(
+          `${(dev * 1000).toFixed(0)}mm`,
+          mark.pixel_x + circleR + r,
+          mark.pixel_y - r,
+        );
+      }
+
+      // Base marks (or tip fallback): reprojection line + crosshair
       if (res?.projected_x != null && res.projected_y != null && res.reprojection_px != null) {
         const rpx = res.reprojection_px;
         const indicatorColor =
@@ -142,6 +180,15 @@ export default function ImageViewer({
         ctx.strokeStyle = indicatorColor;
         ctx.lineWidth = 1.5 / transform.scale;
         ctx.stroke();
+
+        // Label with reprojection error in pixels
+        ctx.font = `${Math.max(10, 12 / transform.scale)}px monospace`;
+        ctx.fillStyle = indicatorColor;
+        ctx.fillText(
+          `${rpx.toFixed(1)}px`,
+          mark.pixel_x + r * 2,
+          mark.pixel_y - r * 2,
+        );
       }
     }
 
@@ -187,21 +234,29 @@ export default function ImageViewer({
     setDragging(false);
   }
 
-  // Zoom
-  function handleWheel(e: React.WheelEvent) {
-    e.preventDefault();
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+  // Zoom — native wheel listener so preventDefault actually stops page scroll
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    setTransform((t) => ({
-      scale: t.scale * factor,
-      x: mx - (mx - t.x) * factor,
-      y: my - (my - t.y) * factor,
-    }));
-  }
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = canvas!.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+
+      setTransform((t) => ({
+        scale: t.scale * factor,
+        x: mx - (mx - t.x) * factor,
+        y: my - (my - t.y) * factor,
+      }));
+    }
+
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
+  }, []);
 
   const myMarks = marks.filter((m) => m.image_name === imageName);
   const topCount = myMarks.filter((m) => m.mark_type === "base").length;
@@ -223,7 +278,6 @@ export default function ImageViewer({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
         onContextMenu={(e) => e.preventDefault()}
       />
     </div>
