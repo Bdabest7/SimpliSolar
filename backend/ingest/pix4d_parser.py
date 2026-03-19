@@ -18,7 +18,39 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import numpy as np
+
 from backend.models.camera import CameraExtrinsics, CameraIntrinsics, CameraModel
+
+
+def _opk_to_c2w(omega_deg: float, phi_deg: float, kappa_deg: float) -> np.ndarray:
+    """Build camera-to-world rotation from Pix4D OPK angles (degrees).
+
+    Pix4D defines Rz(κ)·Ry(φ)·Rx(ω) as the world-to-camera rotation.
+    Transpose gives camera-to-world.
+    """
+    o = np.radians(omega_deg)
+    p = np.radians(phi_deg)
+    k = np.radians(kappa_deg)
+
+    Rx = np.array([
+        [1, 0, 0],
+        [0, np.cos(o), -np.sin(o)],
+        [0, np.sin(o), np.cos(o)],
+    ])
+    Ry = np.array([
+        [np.cos(p), 0, np.sin(p)],
+        [0, 1, 0],
+        [-np.sin(p), 0, np.cos(p)],
+    ])
+    Rz = np.array([
+        [np.cos(k), -np.sin(k), 0],
+        [np.sin(k), np.cos(k), 0],
+        [0, 0, 1],
+    ])
+
+    R_w2c = Rz @ Ry @ Rx
+    return R_w2c.T  # camera-to-world
 
 
 def parse_external_params(filepath: Path) -> dict[str, CameraExtrinsics]:
@@ -43,9 +75,10 @@ def parse_external_params(filepath: Path) -> dict[str, CameraExtrinsics]:
             x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
             omega, phi, kappa = float(parts[4]), float(parts[5]), float(parts[6])
 
+            R_c2w = _opk_to_c2w(omega, phi, kappa)
             cameras[name] = CameraExtrinsics(
                 x=x, y=y, z=z,
-                omega=omega, phi=phi, kappa=kappa,
+                rotation=R_c2w.flatten().tolist(),
             )
 
     return cameras

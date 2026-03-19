@@ -11,12 +11,22 @@ from backend.engine.camera_math import pixel_to_ray, project_point, undistort_pi
 from backend.models.camera import CameraExtrinsics, CameraIntrinsics, CameraModel
 
 
+def _opk_to_c2w(omega_deg, phi_deg, kappa_deg):
+    """Build camera-to-world rotation from OPK (Pix4D convention)."""
+    o, p, k = np.radians(omega_deg), np.radians(phi_deg), np.radians(kappa_deg)
+    Rx = np.array([[1,0,0],[0,np.cos(o),-np.sin(o)],[0,np.sin(o),np.cos(o)]])
+    Ry = np.array([[np.cos(p),0,np.sin(p)],[0,1,0],[-np.sin(p),0,np.cos(p)]])
+    Rz = np.array([[np.cos(k),-np.sin(k),0],[np.sin(k),np.cos(k),0],[0,0,1]])
+    return (Rz @ Ry @ Rx).T
+
+
 def _make_camera(
     x=0.0, y=0.0, z=100.0,
     omega=0.0, phi=0.0, kappa=0.0,
     focal=4000.0, width=5472, height=3648,
 ) -> CameraModel:
     """Create a synthetic camera model (nadir-looking by default)."""
+    R_c2w = _opk_to_c2w(omega, phi, kappa)
     return CameraModel(
         image_name="test.jpg",
         intrinsics=CameraIntrinsics(
@@ -30,7 +40,7 @@ def _make_camera(
         ),
         extrinsics=CameraExtrinsics(
             x=x, y=y, z=z,
-            omega=omega, phi=phi, kappa=kappa,
+            rotation=R_c2w.flatten().tolist(),
         ),
     )
 
@@ -70,8 +80,8 @@ class TestRayConstruction:
             cam.intrinsics.cx, cam.intrinsics.cy, cam
         )
         np.testing.assert_array_almost_equal(origin, [0, 0, 100])
-        # Direction should be approximately [0, 0, 1] (into scene = down)
-        assert direction[2] > 0.99  # Strongly downward
+        # Direction should be approximately [0, 0, -1] (into scene = down)
+        assert direction[2] < -0.99  # Strongly downward
 
     def test_round_trip(self):
         """Project a 3D point, then cast a ray back — should recover the 3D point."""

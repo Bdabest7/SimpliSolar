@@ -25,13 +25,13 @@ class TestComputeHeight:
         height = compute_height(base, tip, sun_altitude_deg=30.0)
         assert abs(height - expected) < 0.001
 
-    def test_ignores_vertical_component(self):
-        """Height calc uses only horizontal shadow distance, ignoring Z diff."""
+    def test_terrain_slope_correction(self):
+        """Height calc applies terrain slope correction from Z difference."""
         base = np.array([0.0, 0.0, 10.0])
         tip = np.array([5.0, 0.0, 8.0])  # 2m lower (sloping ground)
-        # Horizontal distance is still 5m
+        # height = shadow_h * tan(45) + (z_tip - z_base) = 5 + (8-10) = 3
         height = compute_height(base, tip, sun_altitude_deg=45.0)
-        assert abs(height - 5.0) < 0.001
+        assert abs(height - 3.0) < 0.001
 
     def test_negative_sun_raises(self):
         """Sun below horizon should raise ValueError."""

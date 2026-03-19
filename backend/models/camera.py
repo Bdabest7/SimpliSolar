@@ -22,41 +22,24 @@ class CameraIntrinsics(BaseModel):
 
 
 class CameraExtrinsics(BaseModel):
-    """Camera pose in world coordinates."""
+    """Camera pose in world coordinates.
+
+    The rotation field stores a 3×3 camera-to-world rotation matrix in
+    row-major order (9 floats).  Each parser is responsible for converting
+    from its native convention (OPK angles, 4×4 transforms, etc.) into
+    this single internal representation at import time.
+    """
 
     x: float = Field(description="Camera X position (Easting)")
     y: float = Field(description="Camera Y position (Northing)")
     z: float = Field(description="Camera Z position (Altitude)")
-    omega: float = Field(description="Rotation Omega in degrees")
-    phi: float = Field(description="Rotation Phi in degrees")
-    kappa: float = Field(description="Rotation Kappa in degrees")
+    rotation: list[float] = Field(
+        description="3×3 camera-to-world rotation matrix, row-major (9 floats)"
+    )
 
     def rotation_matrix(self) -> np.ndarray:
-        """Build 3x3 rotation matrix from Omega/Phi/Kappa (degrees).
-
-        Uses photogrammetric convention: R = Rz(kappa) @ Ry(phi) @ Rx(omega).
-        Returns the rotation from world to camera frame.
-        """
-        o = np.radians(self.omega)
-        p = np.radians(self.phi)
-        k = np.radians(self.kappa)
-
-        Rx = np.array([
-            [1, 0, 0],
-            [0, np.cos(o), -np.sin(o)],
-            [0, np.sin(o), np.cos(o)],
-        ])
-        Ry = np.array([
-            [np.cos(p), 0, np.sin(p)],
-            [0, 1, 0],
-            [-np.sin(p), 0, np.cos(p)],
-        ])
-        Rz = np.array([
-            [np.cos(k), -np.sin(k), 0],
-            [np.sin(k), np.cos(k), 0],
-            [0, 0, 1],
-        ])
-        return Rz @ Ry @ Rx
+        """Return the 3×3 camera-to-world rotation matrix."""
+        return np.array(self.rotation).reshape(3, 3)
 
     def position(self) -> np.ndarray:
         """Camera position as [X, Y, Z] array."""

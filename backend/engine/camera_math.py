@@ -76,9 +76,9 @@ def pixel_to_ray(
     dir_cam = np.array([x_u, y_u, -1.0])
     dir_cam /= np.linalg.norm(dir_cam)
 
-    # Rotation matrix: world-to-camera.  Transpose = camera-to-world.
+    # Rotation matrix: camera-to-world.
     R = camera.extrinsics.rotation_matrix()
-    dir_world = R.T @ dir_cam
+    dir_world = R @ dir_cam
     dir_world /= np.linalg.norm(dir_world)
 
     origin = camera.extrinsics.position()
@@ -93,11 +93,11 @@ def project_point(
 
     Returns None if the point is behind the camera.
     """
-    R = camera.extrinsics.rotation_matrix()
+    R = camera.extrinsics.rotation_matrix()  # camera-to-world
     t = camera.extrinsics.position()
 
-    # Transform to camera frame
-    p_cam = R @ (point_3d - t)
+    # Transform to camera frame (R is c2w, so R.T is w2c)
+    p_cam = R.T @ (point_3d - t)
 
     # Photogrammetric convention: camera Z points backward (away from scene).
     # Points IN FRONT of the camera (in the scene) have p_cam[2] < 0.

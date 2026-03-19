@@ -12,7 +12,17 @@ from backend.engine.ray_intersection import intersect_rays, intersect_rays_robus
 from backend.models.camera import CameraExtrinsics, CameraIntrinsics, CameraModel
 
 
+def _opk_to_c2w(omega_deg, phi_deg, kappa_deg):
+    """Build camera-to-world rotation from OPK (Pix4D convention)."""
+    o, p, k = np.radians(omega_deg), np.radians(phi_deg), np.radians(kappa_deg)
+    Rx = np.array([[1,0,0],[0,np.cos(o),-np.sin(o)],[0,np.sin(o),np.cos(o)]])
+    Ry = np.array([[np.cos(p),0,np.sin(p)],[0,1,0],[-np.sin(p),0,np.cos(p)]])
+    Rz = np.array([[np.cos(k),-np.sin(k),0],[np.sin(k),np.cos(k),0],[0,0,1]])
+    return (Rz @ Ry @ Rx).T
+
+
 def _make_camera(x, y, z, omega=0.0, phi=0.0, kappa=0.0) -> CameraModel:
+    R_c2w = _opk_to_c2w(omega, phi, kappa)
     return CameraModel(
         image_name=f"cam_{x}_{y}.jpg",
         intrinsics=CameraIntrinsics(
@@ -22,7 +32,7 @@ def _make_camera(x, y, z, omega=0.0, phi=0.0, kappa=0.0) -> CameraModel:
         ),
         extrinsics=CameraExtrinsics(
             x=x, y=y, z=z,
-            omega=omega, phi=phi, kappa=kappa,
+            rotation=R_c2w.flatten().tolist(),
         ),
     )
 
@@ -102,8 +112,8 @@ class TestRobustIntersection:
             origins.append(o)
             directions.append(d)
 
-        # Corrupt the third ray direction
-        directions[2] = np.array([0.5, 0.5, -0.707])
+        # Corrupt the third ray direction (point it sideways instead of down)
+        directions[2] = np.array([0.9, 0.1, -0.1])
         directions[2] /= np.linalg.norm(directions[2])
 
         point, rms = intersect_rays_robust(origins, directions, max_residual=0.1)

@@ -180,26 +180,55 @@ def _canonical_to_base(
     return pos
 
 
-def _canonical_opk_to_base(
-    omega: float, phi: float, kappa: float,
+def _build_opf_c2w(
+    omega_deg: float, phi_deg: float, kappa_deg: float,
     swap_xy: bool,
-) -> tuple[float, float, float]:
-    """Convert OPK angles from canonical frame back to base CRS frame.
+) -> np.ndarray:
+    """Build camera-to-world rotation matrix from OPF orientation angles.
 
-    When swap_xy is False, canonical axes = base axes (just shifted),
-    so OPK values are unchanged.
+    OPF defines Rx(ω)·Ry(φ)·Rz(κ) as camera-to-canonical in a Y-up
+    camera frame.  We convert to our internal convention (Y-down camera
+    frame, base CRS world axes).
 
-    When swap_xy is True, the canonical X came from base Y and vice versa.
-    The rotation that was Rx(ω)·Ry(φ)·Rz(κ) in canonical frame becomes
-    a rotation about swapped axes in the base frame.  For a pure XY swap
-    (90° rotation about Z), the transformed angles are:
-        ω_base = φ_canonical
-        φ_base = ω_canonical
-        κ_base = -κ_canonical
+    Steps:
+      1. Build R_opf = Rx(ω) @ Ry(φ) @ Rz(κ)   (c2w in canonical, Y-up cam)
+      2. If swap_xy: pre-multiply by XY swap matrix to go canonical → base
+      3. Post-multiply by diag(1, -1, 1) to convert Y-up → Y-down camera frame
+
+    Returns 3×3 camera-to-world rotation in base CRS, Y-down camera frame.
     """
-    if not swap_xy:
-        return omega, phi, kappa
-    return phi, omega, -kappa
+    o = np.radians(omega_deg)
+    p = np.radians(phi_deg)
+    k = np.radians(kappa_deg)
+
+    Rx = np.array([
+        [1, 0, 0],
+        [0, np.cos(o), -np.sin(o)],
+        [0, np.sin(o), np.cos(o)],
+    ])
+    Ry = np.array([
+        [np.cos(p), 0, np.sin(p)],
+        [0, 1, 0],
+        [-np.sin(p), 0, np.cos(p)],
+    ])
+    Rz = np.array([
+        [np.cos(k), -np.sin(k), 0],
+        [np.sin(k), np.cos(k), 0],
+        [0, 0, 1],
+    ])
+
+    R_opf = Rx @ Ry @ Rz  # camera-to-canonical (Y-up camera frame)
+
+    if swap_xy:
+        # Canonical X/Y are swapped relative to base CRS
+        S = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]], dtype=float)
+        R_opf = S @ R_opf
+
+    # Convert camera frame from Y-up to Y-down (negate Y column)
+    F = np.diag([1.0, -1.0, 1.0])
+    R_c2w = R_opf @ F
+
+    return R_c2w
 
 
 def _parse_sensor(sensor_data: dict, image_width: int = 0, image_height: int = 0) -> CameraIntrinsics:
@@ -218,7 +247,9 @@ def _parse_sensor(sensor_data: dict, image_width: int = 0, image_height: int = 0
     while len(tangential) < 2:
         tangential.append(0.0)
 
-    # OPF principal point is in pixels from the top-left corner
+    # OPF principal point is in pixels from the top-left corner.
+    # OPF uses a Y-up camera frame; our convention is Y-down.
+    # Negating p1 converts the tangential distortion to our frame.
     return CameraIntrinsics(
         focal_length_px=focal,
         cx=pp[0],
@@ -226,7 +257,7 @@ def _parse_sensor(sensor_data: dict, image_width: int = 0, image_height: int = 0
         k1=radial[0],
         k2=radial[1],
         k3=radial[2],
-        p1=tangential[0],
+        p1=-tangential[0],
         p2=tangential[1],
         image_width=image_width,
         image_height=image_height,
@@ -350,8 +381,8 @@ def load_opf_cameras(opf_dir: Path) -> dict[str, CameraModel]:
             pos_canonical, srf["shift"], srf["scale"], srf["swap_xy"]
         )
 
-        # Convert OPK from canonical frame → base CRS frame
-        omega, phi, kappa = _canonical_opk_to_base(
+        # Build camera-to-world rotation matrix from OPF angles
+        R_c2w = _build_opf_c2w(
             orient[0], orient[1], orient[2], srf["swap_xy"]
         )
 
@@ -359,9 +390,7 @@ def load_opf_cameras(opf_dir: Path) -> dict[str, CameraModel]:
             x=float(pos_base[0]),
             y=float(pos_base[1]),
             z=float(pos_base[2]),
-            omega=omega,
-            phi=phi,
-            kappa=kappa,
+            rotation=R_c2w.flatten().tolist(),
         )
 
         # Get intrinsics (clone with correct image dimensions)
@@ -400,8 +429,8 @@ def load_opf_cameras(opf_dir: Path) -> dict[str, CameraModel]:
         sample_name, sample_cam = next(iter(cameras.items()))
         e = sample_cam.extrinsics
         log.info(
-            "Sample camera '%s' — position: (%.3f, %.3f, %.3f)  OPK: (%.4f, %.4f, %.4f)",
-            sample_name, e.x, e.y, e.z, e.omega, e.phi, e.kappa,
+            "Sample camera '%s' — position: (%.3f, %.3f, %.3f)",
+            sample_name, e.x, e.y, e.z,
         )
 
     return cameras

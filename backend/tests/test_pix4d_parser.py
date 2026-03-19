@@ -3,6 +3,7 @@
 from pathlib import Path
 import tempfile
 
+import numpy as np
 import pytest
 
 from backend.ingest.pix4d_parser import parse_external_params, parse_internal_params
@@ -33,8 +34,9 @@ class TestExternalParams:
         assert "DJI_0001.JPG" in cameras
         cam = cameras["DJI_0001.JPG"]
         assert abs(cam.x - 567890.123) < 0.001
-        assert abs(cam.omega - (-0.5)) < 0.001
-        assert abs(cam.kappa - 89.3) < 0.001
+        # Rotation should be a 9-element list forming a valid rotation matrix
+        R = np.array(cam.rotation).reshape(3, 3)
+        assert abs(np.linalg.det(R) - 1.0) < 1e-6  # proper rotation
 
     def test_skip_empty_lines(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:

@@ -13,7 +13,6 @@ We compose camera→chunk→world to get extrinsics in the project CRS.
 
 from __future__ import annotations
 
-import math
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -29,22 +28,6 @@ def _parse_4x4(text: str) -> np.ndarray:
         raise ValueError(f"Expected 16 values for 4x4 matrix, got {len(vals)}")
     return np.array(vals).reshape(4, 4)
 
-
-def _rotation_to_opk(R: np.ndarray) -> tuple[float, float, float]:
-    """Extract Omega, Phi, Kappa (degrees) from a 3×3 rotation matrix.
-
-    Uses the convention R = Rz(kappa) @ Ry(phi) @ Rx(omega).
-    """
-    phi = math.asin(np.clip(R[0, 2], -1.0, 1.0))
-
-    if abs(math.cos(phi)) > 1e-6:
-        omega = math.atan2(-R[1, 2], R[2, 2])
-        kappa = math.atan2(-R[0, 1], R[0, 0])
-    else:
-        omega = math.atan2(R[1, 0], R[1, 1])
-        kappa = 0.0
-
-    return math.degrees(omega), math.degrees(phi), math.degrees(kappa)
 
 
 def _parse_sensor(sensor_el: ET.Element) -> CameraIntrinsics:
@@ -134,15 +117,11 @@ def load_metashape_cameras(xml_path: Path) -> dict[str, CameraModel]:
         R = T_cam_to_world[:3, :3]
         t = T_cam_to_world[:3, 3]
 
-        # Metashape camera frame: X-right, Y-down, Z-forward
-        # Our convention matches, so R is world-to-camera = inverse of cam-to-world rotation
-        # But the transform is cam_to_world, so we need its inverse for our extrinsics
-        # Actually, position = t (translation column), R_w2c = R^T
-        omega, phi, kappa = _rotation_to_opk(R.T)
-
+        # Metashape camera frame: X-right, Y-down, Z-forward (matches ours).
+        # R is already camera-to-world — store directly.
         extrinsics = CameraExtrinsics(
             x=float(t[0]), y=float(t[1]), z=float(t[2]),
-            omega=omega, phi=phi, kappa=kappa,
+            rotation=R.flatten().tolist(),
         )
 
         cameras[label] = CameraModel(
