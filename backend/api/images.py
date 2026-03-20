@@ -40,7 +40,12 @@ def serve_image(project_id: str, image_name: str):
 
 @router.get("/covering/{target_id}")
 def get_covering_images(project_id: str, target_id: str, max_images: int = 15) -> list[str]:
-    """Find images that cover a specific target."""
+    """Find images that cover a specific target.
+
+    Uses projection-based visibility checking: the target's 3D position
+    is projected through each camera model to verify it actually appears
+    in the image.  Falls back to XY distance if projection finds nothing.
+    """
     project = project_service.load_project(project_id)
     target = next((t for t in project.targets if t.id == target_id), None)
     if target is None:
@@ -51,7 +56,20 @@ def get_covering_images(project_id: str, target_id: str, max_images: int = 15) -
     except Exception as e:
         raise HTTPException(400, f"Cannot load cameras: {e}")
 
-    return find_covering_images(target, cameras, max_images=max_images)
+    # Use DTM for accurate ground Z if available
+    ground_z: float | None = None
+    if project.dtm_path:
+        try:
+            from pathlib import Path
+            from backend.ingest.dtm_loader import load_dtm
+            dtm = load_dtm(Path(project.dtm_path))
+            z = dtm.lookup(target.x, target.y)
+            if z is not None:
+                ground_z = z
+        except Exception as e:
+            log.debug("DTM lookup failed for ground_z: %s", e)
+
+    return find_covering_images(target, cameras, ground_z=ground_z, max_images=max_images)
 
 
 @router.get("/{image_name}/exif")

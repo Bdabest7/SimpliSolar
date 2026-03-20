@@ -226,6 +226,11 @@ def link_camera_track(project_id: str, req: LinkCameraRequest) -> Project:
         project.status = ProjectStatus.INGESTED
         project_service.save_project(project)
         log.info("Camera track linked for project %s", project_id)
+
+        # If targets were imported before the camera track, re-check for X/Y swap
+        if project.targets:
+            _revalidate_target_swap(project)
+
         return project
 
     except HTTPException:
@@ -352,8 +357,7 @@ def link_targets(project_id: str, req: LinkTargetsRequest) -> dict:
                     if cam_epsg and cam_epsg != user_epsg:
                         epsg_warn = (
                             f"CRS mismatch: camera track is EPSG:{cam_epsg} "
-                            f"({crs.get('name', 'unknown')}) but target CSV "
-                            f"EPSG:{user_epsg} was specified. "
+                            f"but target CSV EPSG:{user_epsg} was specified. "
                             "Heights will be incorrect unless both use the same CRS."
                         )
                         log.warning(epsg_warn)
@@ -390,6 +394,57 @@ def _get_camera_bbox(project) -> tuple[float, float, float, float] | None:
     except Exception as e:
         log.debug("Could not load cameras for bbox check: %s", e)
         return None
+
+
+def _revalidate_target_swap(project: Project) -> None:
+    """Re-check existing targets for X/Y swap against the camera bounding box.
+
+    Called when the camera track is linked AFTER targets were already imported
+    (so the original link-targets check ran without cameras).
+    """
+    cam_bbox = _get_camera_bbox(project)
+    if cam_bbox is None:
+        return
+
+    cx_min, cx_max, cy_min, cy_max = cam_bbox
+    tx_vals = [t.x for t in project.targets]
+    ty_vals = [t.y for t in project.targets]
+    tx_min, tx_max = min(tx_vals), max(tx_vals)
+    ty_min, ty_max = min(ty_vals), max(ty_vals)
+
+    def _overlaps(a_min, a_max, b_min, b_max, tol=5000.0) -> bool:
+        return a_min - tol <= b_max and b_min - tol <= a_max
+
+    direct_ok = (_overlaps(cx_min, cx_max, tx_min, tx_max) and
+                 _overlaps(cy_min, cy_max, ty_min, ty_max))
+
+    if direct_ok:
+        return  # Coordinates match, nothing to do
+
+    swapped_ok = (_overlaps(cx_min, cx_max, ty_min, ty_max) and
+                  _overlaps(cy_min, cy_max, tx_min, tx_max))
+
+    if swapped_ok:
+        log.warning(
+            "Post-camera-track check: target X/Y appear swapped vs cameras. "
+            "Auto-correcting %d targets. "
+            "(Target X: %.0f–%.0f, Camera X: %.0f–%.0f)",
+            len(project.targets), tx_min, tx_max, cx_min, cx_max,
+        )
+        from backend.models.project import Target as _Target
+        project.targets = [
+            _Target(id=t.id, label=t.label, x=t.y, y=t.x, z=t.z)
+            for t in project.targets
+        ]
+        project_service.save_project(project)
+    else:
+        log.warning(
+            "Post-camera-track check: targets do not overlap cameras even after swap. "
+            "Camera X: %.0f–%.0f  Y: %.0f–%.0f | "
+            "Target X: %.0f–%.0f  Y: %.0f–%.0f",
+            cx_min, cx_max, cy_min, cy_max,
+            tx_min, tx_max, ty_min, ty_max,
+        )
 
 
 @router.post("/{project_id}/link-images")

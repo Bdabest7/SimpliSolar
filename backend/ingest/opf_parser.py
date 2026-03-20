@@ -146,9 +146,12 @@ def _load_scene_reference_frame(opf_dir: Path) -> dict:
     elif isinstance(crs_obj, str):
         crs_def = crs_obj
 
+    # Extract just the EPSG code for concise logging
+    _epsg_match = re.search(r'EPSG[",:\s]+(\d{4,5})', crs_def)
+    crs_short = f"EPSG:{_epsg_match.group(1)}" if _epsg_match else (crs_def[:60] or "(none)")
     log.info(
         "Scene reference frame — CRS: %s | shift: %s | scale: %s | swap_xy: %s",
-        crs_def or "(none)", shift.tolist(), scale.tolist(), swap_xy,
+        crs_short, shift.tolist(), scale.tolist(), swap_xy,
     )
     return {"shift": shift, "scale": scale, "swap_xy": swap_xy, "crs": crs_def}
 
