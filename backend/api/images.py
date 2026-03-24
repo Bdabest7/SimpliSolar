@@ -72,6 +72,65 @@ def get_covering_images(project_id: str, target_id: str, max_images: int = 15) -
     return find_covering_images(target, cameras, ground_z=ground_z, max_images=max_images)
 
 
+@router.get("/covering/{target_id}/projections")
+def get_target_projections(project_id: str, target_id: str) -> dict:
+    """Project the target's CSV coords and computed position into each covering image.
+
+    Returns per-image pixel coordinates for:
+    - csv: target XY from the imported CSV (blue crosshair)
+    - computed: triangulated Object Top from marks (green crosshair)
+    """
+    import numpy as np
+    from backend.engine.camera_math import project_point
+    from backend.services.measurement_service import _load_marks, _triangulate
+
+    project = project_service.load_project(project_id)
+    target = next((t for t in project.targets if t.id == target_id), None)
+    if target is None:
+        raise HTTPException(404, f"Target {target_id} not found")
+
+    try:
+        cameras = _load_cameras(project)
+    except Exception as e:
+        raise HTTPException(400, f"Cannot load cameras: {e}")
+
+    # Determine ground Z for the CSV target position
+    target_z = target.z or 0.0
+    if project.dtm_path:
+        try:
+            from backend.ingest.dtm_loader import load_dtm
+            dtm = load_dtm(Path(project.dtm_path))
+            z = dtm.lookup(target.x, target.y)
+            if z is not None:
+                target_z = z
+        except Exception:
+            pass
+
+    # Project CSV target position into each camera
+    target_3d = np.array([target.x, target.y, target_z])
+    csv_projections: dict[str, list[float]] = {}
+    for name, cam in cameras.items():
+        proj = project_point(target_3d, cam)
+        if proj is not None:
+            csv_projections[name] = [proj[0], proj[1]]
+
+    # Project triangulated Object Top into each camera (if marks exist)
+    computed_projections: dict[str, list[float]] = {}
+    try:
+        mark_set = _load_marks(project_id, target_id)
+        base_marks = [m for m in mark_set.marks if m.mark_type == "base"]
+        if len(base_marks) >= 2:
+            point_3d, _ = _triangulate(base_marks, cameras)
+            for name, cam in cameras.items():
+                proj = project_point(point_3d, cam)
+                if proj is not None:
+                    computed_projections[name] = [proj[0], proj[1]]
+    except Exception:
+        pass
+
+    return {"csv": csv_projections, "computed": computed_projections}
+
+
 @router.get("/{image_name}/exif")
 def get_image_exif(project_id: str, image_name: str) -> dict:
     """Read capture timestamp and GPS coordinates from image EXIF.

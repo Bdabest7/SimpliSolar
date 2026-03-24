@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Project, Target, MarkType } from "../types";
-import { getCoveringImages, imageUrl, computeHeight, getResiduals } from "../api/client";
-import type { MarkResidual } from "../api/client";
+import { getCoveringImages, imageUrl, computeHeight, getResiduals, getTargetProjections } from "../api/client";
+import type { MarkResidual, TargetProjections } from "../api/client";
 import { useMarking } from "../hooks/useMarking";
 import ImageViewer from "./ImageViewer";
 
@@ -17,6 +17,10 @@ export default function MarkingPanel({ project, target, onMeasured }: Props) {
   const [computing, setComputing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [residuals, setResiduals] = useState<MarkResidual[]>([]);
+  const [projections, setProjections] = useState<TargetProjections>({ csv: {}, computed: {} });
+  const [sharedZoom, setSharedZoom] = useState<number | null>(null);
+  const zoomRafRef = useRef(0);
+  const [sliderValue, setSliderValue] = useState(0);
 
   const { markSet, add, undo, clear, refresh } = useMarking(project.id, target.id);
 
@@ -25,15 +29,22 @@ export default function MarkingPanel({ project, target, onMeasured }: Props) {
     getCoveringImages(project.id, target.id)
       .then(setCoveringImages)
       .catch(() => setCoveringImages([]));
+    getTargetProjections(project.id, target.id)
+      .then(setProjections)
+      .catch(() => setProjections({ csv: {}, computed: {} }));
   }, [project.id, target.id, refresh]);
 
-  // Re-compute reprojection residuals whenever marks change
+  // Re-compute reprojection residuals and computed projections whenever marks change
   useEffect(() => {
     if (markSet.marks.length === 0) {
       setResiduals([]);
+      setProjections((p) => ({ ...p, computed: {} }));
       return;
     }
     getResiduals(project.id, target.id).then(setResiduals);
+    getTargetProjections(project.id, target.id)
+      .then(setProjections)
+      .catch(() => {});
   }, [markSet.marks, project.id, target.id]);
 
   const topCount = markSet.marks.filter((m) => m.mark_type === "base").length;
@@ -84,6 +95,34 @@ export default function MarkingPanel({ project, target, onMeasured }: Props) {
           Undo
         </button>
         <button onClick={clear}>Clear Marks</button>
+        <span style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 8 }}>
+          <label
+            style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer", whiteSpace: "nowrap" }}
+            title="Zoom all images to the target CSV position. Click label to reset to fit."
+            onClick={() => { setSharedZoom(null); setSliderValue(0); }}
+          >
+            Zoom:
+          </label>
+          <input
+            type="range"
+            min={0}
+            max={300}
+            value={sliderValue}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setSliderValue(v);
+              cancelAnimationFrame(zoomRafRef.current);
+              zoomRafRef.current = requestAnimationFrame(() => {
+                setSharedZoom(v === 0 ? null : Math.pow(1.02, v));
+              });
+            }}
+            style={{ width: 90, cursor: "pointer" }}
+            title={sharedZoom != null ? `${sharedZoom.toFixed(1)}x` : "Fit"}
+          />
+          <span style={{ fontSize: 10, color: "var(--text-muted)", minWidth: 28 }}>
+            {sharedZoom != null ? `${sharedZoom.toFixed(1)}x` : "Fit"}
+          </span>
+        </span>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 11, color: hasDtm ? "var(--text-muted)" : "var(--danger)" }}>
           {hasDtm ? "⛰ DTM height" : "⚠ No DTM — add in project setup"}
@@ -108,13 +147,16 @@ export default function MarkingPanel({ project, target, onMeasured }: Props) {
         ) : (
           coveringImages.map((name) => (
             <ImageViewer
-              key={name}
+              key={`${target.id}-${name}`}
               imageUrl={imageUrl(project.id, name)}
               imageName={name}
               marks={markSet.marks}
               activeMarkType={activeMarkType}
               onMark={add}
               residuals={residuals}
+              csvProjection={projections.csv[name]}
+              computedProjection={projections.computed[name]}
+              sharedZoom={sharedZoom}
             />
           ))
         )}

@@ -180,6 +180,20 @@ export async function getCoveringImages(
   );
 }
 
+export interface TargetProjections {
+  csv: Record<string, [number, number]>;
+  computed: Record<string, [number, number]>;
+}
+
+export async function getTargetProjections(
+  projectId: string,
+  targetId: string
+): Promise<TargetProjections> {
+  return json(
+    await fetch(`${BASE}/projects/${projectId}/images/covering/${targetId}/projections`)
+  );
+}
+
 export async function getImageExif(
   projectId: string,
   imageName: string
