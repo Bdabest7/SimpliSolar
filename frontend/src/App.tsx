@@ -79,7 +79,7 @@ export default function App() {
             onMeasured={refresh}
           />
         ) : (
-          <div style={{ padding: 40, color: "var(--text-muted)" }}>
+          <div style={{ padding: 40, color: "var(--text-muted)", overflowY: "auto", height: "100%" }}>
             <p>Select a target from the sidebar to begin marking.</p>
             <div style={{ marginTop: 24 }}>
               <ResultsTable measurements={project.measurements} />
